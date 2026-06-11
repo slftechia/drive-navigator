@@ -298,9 +298,10 @@ class AtlasMap {
 
     const move: maplibregl.CameraOptions = {};
     if (options.center) move.center = options.center;
-    if (options.zoom != null) move.zoom = options.zoom;
-    if (options.bearing != null) move.bearing = options.bearing;
-    if (options.pitch != null) move.pitch = options.pitch;
+    if (options.zoom != null && Number.isFinite(options.zoom)) move.zoom = options.zoom;
+    if (options.bearing != null && Number.isFinite(options.bearing)) move.bearing = options.bearing;
+    if (options.pitch != null && Number.isFinite(options.pitch)) move.pitch = options.pitch;
+    if (options.padding != null) move.padding = options.padding;
 
     if (duration > 0) this.map.easeTo({ ...move, duration });
     else this.map.jumpTo(move);

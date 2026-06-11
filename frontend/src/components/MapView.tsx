@@ -50,20 +50,16 @@ const ZOOM_HOME = 15;
 /** Inclinação 3D estilo Waze — mostra horizonte sem “colar” na rua. */
 const NAV_PITCH = 55;
 const NAV_PITCH_MOBILE = 48;
-/** Zoom de navegação: ~15–16 (Waze). Valores 17+ deixam a tela muito ampliada. */
-const ZOOM_NAV_FLAT = 16;
-const ZOOM_NAV_MAX = 17;
-const ZOOM_ROUTE_OVERVIEW_MAX = 13;
+/** Zoom de navegação — meio-termo entre visão Waze e street-level. */
+const ZOOM_NAV_FLAT = 17;
+const ZOOM_NAV_MAX = 18;
 
-/** Zoom alvo na navegação 3D — mais afastado que street-level extremo. */
-function navTargetZoom(pitch: number): number {
-  const mobile = isMobileViewport();
-  const base = mobile ? 15.6 : 16;
-  if (pitch <= 0) return base;
-  // Com pitch alto o horizonte já mostra mais área — não aumentar zoom.
-  const adjusted = base - pitch * 0.006;
-  return Math.max(mobile ? 14.8 : 15.2, Math.min(ZOOM_NAV_MAX, adjusted));
+/** Zoom fixo na navegação 3D (pitch não altera — evita ficar longe ou colado). */
+function navTargetZoom(_pitch: number): number {
+  return isMobileViewport() ? 16.9 : 17.2;
 }
+
+const ZOOM_ROUTE_OVERVIEW_MAX = 13;
 
 /** Desloca levemente o centro à frente do carro para enquadrar a via. */
 function navCameraCenter(
@@ -73,8 +69,8 @@ function navCameraCenter(
   pitch = 0
 ): { lat: number; lon: number } {
   const mobile = isMobileViewport();
-  let forwardKm = mobile ? 0.09 : 0.11;
-  if (pitch > 35) forwardKm += mobile ? 0.035 : 0.04;
+  let forwardKm = mobile ? 0.065 : 0.08;
+  if (pitch > 35) forwardKm += mobile ? 0.025 : 0.03;
   return destinationPoint(lat, lon, bearing, forwardKm);
 }
 
@@ -564,11 +560,11 @@ export default function MapView({
   onFollowChangeRef.current = onFollowChange;
   modeRef.current = mode;
 
-  const markProgrammaticCamera = useCallback(() => {
+  const markProgrammaticCamera = useCallback((holdMs = NAV_CAMERA_EASE_MS + 200) => {
     programmaticCameraRef.current = true;
     window.setTimeout(() => {
       programmaticCameraRef.current = false;
-    }, 200);
+    }, holdMs);
   }, []);
 
   const isManualMapControl = useCallback(() => {
@@ -576,6 +572,8 @@ export default function MapView({
   }, []);
 
   const pauseGpsFollow = useCallback((fromZoom = false) => {
+    if (programmaticCameraRef.current) return;
+    if (Date.now() < navCameraGuardUntilRef.current) return;
     if (modeRef.current !== 'navigate') return;
     navFollowPauseUntilRef.current = Date.now() + (fromZoom ? 120_000 : 90_000);
     manualExploreLockRef.current = true;
@@ -666,7 +664,7 @@ export default function MapView({
       const transition = animate ? CAMERA_EASE : CAMERA_JUMP;
 
       if (modeRef.current === 'navigate') {
-        if (!followRef.current && !routeOverviewRef.current) return;
+        if (!followRef.current && !routeOverviewRef.current && !opts?.force) return;
 
         const rawHeading = resolveNavHeading(
           focus,
@@ -689,9 +687,11 @@ export default function MapView({
         const targetZoom = navTargetZoom(pitch);
         const currentZoom = map.getCamera()?.zoom;
         const zoom =
-          !followRef.current && currentZoom != null && Number.isFinite(currentZoom)
-            ? currentZoom
-            : targetZoom;
+          opts?.resetZoom || opts?.force
+            ? targetZoom
+            : !followRef.current && currentZoom != null && Number.isFinite(currentZoom)
+              ? currentZoom
+              : targetZoom;
 
         markProgrammaticCamera();
         try {
