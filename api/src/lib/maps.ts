@@ -497,13 +497,15 @@ function parseOsrmRoute(route: OsrmRoute): RouteData {
     for (const step of leg.steps ?? []) {
       const [lon, lat] = step.maneuver.location;
       const message = osrmManeuverMessage(step);
+      const mod = step.maneuver.modifier?.trim().replace(/\s+/g, '-');
+      const instructionType = mod ? `${step.maneuver.type}-${mod}` : step.maneuver.type;
       if (message.length > 2) {
         instructions.push({
           message,
           lat,
           lon,
           distanceMeters: step.distance ?? 0,
-          instructionType: step.maneuver.type,
+          instructionType,
         });
       }
     }

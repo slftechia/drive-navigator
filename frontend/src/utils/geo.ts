@@ -175,6 +175,61 @@ export function routeProgressKm(
   return progress;
 }
 
+/** Rumo de condução ao longo da rota (sempre sentido destino, evita mapa invertido). */
+export function routeHeadingAtPoint(
+  point: { lat: number; lon: number },
+  routePoints: Array<{ lat: number; lon: number }>,
+  lookAheadKm = 0.07
+): number | null {
+  if (routePoints.length < 2) return null;
+
+  const targetKm = routeProgressKm(point, routePoints);
+  let walked = 0;
+  let fromLat = routePoints[0].lat;
+  let fromLon = routePoints[0].lon;
+
+  for (let i = 0; i < routePoints.length - 1; i++) {
+    const a = routePoints[i];
+    const b = routePoints[i + 1];
+    const segLen = haversineKm(a.lat, a.lon, b.lat, b.lon);
+    if (segLen < 1e-9) continue;
+
+    const segStart = walked;
+    const segEnd = walked + segLen;
+
+    if (targetKm <= segEnd || i === routePoints.length - 2) {
+      const t = Math.max(0, Math.min(1, (targetKm - segStart) / segLen));
+      fromLat = a.lat + t * (b.lat - a.lat);
+      fromLon = a.lon + t * (b.lon - a.lon);
+
+      let ahead = 0;
+      let toLat = b.lat;
+      let toLon = b.lon;
+      for (let j = i; j < routePoints.length - 1 && ahead < lookAheadKm; j++) {
+        const p1 = j === i ? { lat: fromLat, lon: fromLon } : routePoints[j];
+        const p2 = routePoints[j + 1];
+        const len = haversineKm(p1.lat, p1.lon, p2.lat, p2.lon);
+        if (len < 1e-9) continue;
+        if (ahead + len >= lookAheadKm) {
+          const u = (lookAheadKm - ahead) / len;
+          toLat = p1.lat + u * (p2.lat - p1.lat);
+          toLon = p1.lon + u * (p2.lon - p1.lon);
+          break;
+        }
+        ahead += len;
+        toLat = p2.lat;
+        toLon = p2.lon;
+      }
+      return bearingDeg(fromLat, fromLon, toLat, toLon);
+    }
+    walked = segEnd;
+  }
+
+  const prev = routePoints[routePoints.length - 2];
+  const last = routePoints[routePoints.length - 1];
+  return bearingDeg(prev.lat, prev.lon, last.lat, last.lon);
+}
+
 /** Recorte da polyline ao redor da posição atual (para buscar alertas no trecho). */
 export function sliceRouteWindow(
   routePoints: Array<{ lat: number; lon: number }>,

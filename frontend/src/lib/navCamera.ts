@@ -1,28 +1,25 @@
 import { destinationPoint } from '../utils/geo';
 
-/** Configuração de câmera de navegação (calibrada estilo Waze — valores originais do projeto). */
-export const NAV_PITCH = 60;
-export const NAV_PITCH_MOBILE = 50;
-export const ZOOM_NAV_FLAT = 17.5;
-export const ZOOM_NAV_MAX = 20;
-/** Abaixo disso a câmera de navegação é forçada de volta (ex.: zoom preso na prévia ~12). */
-export const ZOOM_NAV_MIN_ACTIVE = 17;
+/** Visão Waze com contexto — enxergar a curva à frente (print 2), não colado na linha (print 1). */
+export const NAV_PITCH = 55;
+export const NAV_PITCH_MOBILE = 48;
+export const ZOOM_NAV_FLAT = 16;
+export const ZOOM_NAV_MAX = 17.5;
+/** Zoom mínimo aceitável em navegação (abaixo disso força recâmera). */
+export const ZOOM_NAV_MIN_ACTIVE = 15;
 
 export function isMobileViewport(): boolean {
   return typeof window !== 'undefined' && window.innerWidth < 768;
 }
 
-/** Com inclinação 3D o mapa mostra mais área — compensa levemente o zoom. */
+/** Zoom com pitch 3D — moderado para ver ruas e a próxima manobra. */
 export function navTargetZoom(pitch: number): number {
-  const flat = isMobileViewport() ? ZOOM_NAV_FLAT : 17;
+  const flat = isMobileViewport() ? ZOOM_NAV_FLAT : 16.5;
   if (pitch <= 0) return flat;
-  return Math.min(
-    ZOOM_NAV_MAX,
-    flat + pitch * 0.038 + (isMobileViewport() ? 0.6 : 0.3)
-  );
+  return Math.min(ZOOM_NAV_MAX, flat + pitch * 0.014);
 }
 
-/** Desloca centro à frente do carro — pequeno offset para enquadrar a via à frente. */
+/** Desloca centro à frente do carro para mostrar a curva seguinte. */
 export function navCameraCenter(
   lat: number,
   lon: number,
@@ -30,8 +27,8 @@ export function navCameraCenter(
   pitch = 0
 ): { lat: number; lon: number } {
   const mobile = isMobileViewport();
-  let forwardKm = mobile ? 0.022 : 0.028;
-  if (pitch > 35) forwardKm += mobile ? 0.008 : 0.01;
+  let forwardKm = mobile ? 0.055 : 0.07;
+  if (pitch > 35) forwardKm += mobile ? 0.018 : 0.022;
   return destinationPoint(lat, lon, bearing, forwardKm);
 }
 

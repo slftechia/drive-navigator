@@ -20,6 +20,7 @@ import {
   navTargetZoom,
   ZOOM_NAV_FLAT,
   ZOOM_NAV_MIN_ACTIVE,
+  ZOOM_NAV_MAX,
   isMobileViewport,
 } from '../lib/navCamera';
 import {
@@ -29,6 +30,7 @@ import {
   smoothBearingDeg,
   snapPointToRoute,
   routeProgressKm,
+  routeHeadingAtPoint,
 } from '../utils/geo';
 
 export type MapMode = 'idle' | 'preview' | 'navigate';
@@ -377,23 +379,9 @@ function isGpsOnRoute(
 function headingFromRoute(
   points: RoutePoint[],
   focus: { lat: number; lon: number },
-  lookAheadKm = ROUTE_LOOKAHEAD_KM
+  _lookAheadKm = ROUTE_LOOKAHEAD_KM
 ): number | null {
-  const closest = findClosestOnRoute(points, focus.lat, focus.lon);
-  if (!closest || points.length < 2) return null;
-  const idx = closest.index;
-  const origin = points[idx];
-  let walked = 0;
-  for (let i = idx; i < points.length - 1; i++) {
-    const seg = haversineKm(points[i].lat, points[i].lon, points[i + 1].lat, points[i + 1].lon);
-    walked += seg;
-    if (walked >= lookAheadKm) {
-      return bearingDeg(origin.lat, origin.lon, points[i + 1].lat, points[i + 1].lon);
-    }
-  }
-  const last = points[points.length - 1];
-  const prev = points[Math.max(0, points.length - 2)];
-  return bearingDeg(prev.lat, prev.lon, last.lat, last.lon);
+  return routeHeadingAtPoint(focus, points, _lookAheadKm);
 }
 
 function headingDeltaDeg(a: number, b: number): number {
@@ -1284,7 +1272,7 @@ export default function MapView({
       const cam = map.getCamera();
       const zoom = cam?.zoom ?? 0;
       const pitch = cam?.pitch ?? 0;
-      if (zoom < ZOOM_NAV_MIN_ACTIVE - 0.5 || pitch < 25) {
+      if (zoom < ZOOM_NAV_MIN_ACTIVE - 0.5 || zoom > ZOOM_NAV_MAX + 0.4 || pitch < 20) {
         manualExploreLockRef.current = false;
         navFollowPauseUntilRef.current = 0;
         forceNavCameraRef.current(false, true, true);

@@ -130,22 +130,29 @@ const ICON_PATHS: Record<ManeuverKind, string> = {
 };
 
 export function parseManeuverKind(instructionType?: string, message?: string): ManeuverKind {
-  const type = (instructionType ?? '').toUpperCase().replace(/-/g, '_');
+  const type = (instructionType ?? '').toUpperCase().replace(/-/g, '_').replace(/\s+/g, '_');
   const msg = (message ?? '').toLowerCase();
 
   const fromType: Record<string, ManeuverKind> = {
     TURN_LEFT: 'turn-left',
+    TURN_SHARP_LEFT: 'sharp-left',
+    TURN_SLIGHT_LEFT: 'slight-left',
     SHARP_LEFT: 'sharp-left',
+    SLIGHT_LEFT: 'slight-left',
     BEAR_LEFT: 'slight-left',
     KEEP_LEFT: 'slight-left',
     WAYPOINT_LEFT: 'slight-left',
     ARRIVE_LEFT: 'arrive',
     TURN_RIGHT: 'turn-right',
+    TURN_SHARP_RIGHT: 'sharp-right',
+    TURN_SLIGHT_RIGHT: 'slight-right',
     SHARP_RIGHT: 'sharp-right',
+    SLIGHT_RIGHT: 'slight-right',
     BEAR_RIGHT: 'slight-right',
     KEEP_RIGHT: 'slight-right',
     WAYPOINT_RIGHT: 'slight-right',
     ARRIVE_RIGHT: 'arrive',
+    TURN: 'straight',
     STRAIGHT: 'straight',
     FOLLOW: 'straight',
     DEPART: 'depart',
