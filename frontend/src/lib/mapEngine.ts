@@ -249,6 +249,7 @@ class AtlasMap {
       center: options.center ?? [-48.548, -27.595],
       zoom: options.zoom ?? 12,
       minZoom: options.minZoom ?? 4,
+      maxPitch: 60,
       bearing: options.bearing ?? 0,
       pitch: options.pitch ?? 0,
       attributionControl: { compact: true },
@@ -301,7 +302,13 @@ class AtlasMap {
     if (options.zoom != null && Number.isFinite(options.zoom)) move.zoom = options.zoom;
     if (options.bearing != null && Number.isFinite(options.bearing)) move.bearing = options.bearing;
     if (options.pitch != null && Number.isFinite(options.pitch)) move.pitch = options.pitch;
-    if (options.padding != null) move.padding = options.padding;
+    if (options.padding != null) {
+      if (typeof options.padding === 'number') {
+        this.map.setPadding({ top: options.padding, bottom: options.padding, left: options.padding, right: options.padding });
+      } else {
+        this.map.setPadding(options.padding);
+      }
+    }
 
     if (duration > 0) this.map.easeTo({ ...move, duration });
     else this.map.jumpTo(move);

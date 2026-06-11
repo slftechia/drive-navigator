@@ -14,8 +14,16 @@ import {
 import { turnMapMarkerHtml } from '../lib/turnIcons';
 import { vehicleMarkerHtml } from '../lib/vehicleMarker';
 import {
+  navCameraCenter,
+  navCameraPadding,
+  navPitchForViewport,
+  navTargetZoom,
+  ZOOM_NAV_FLAT,
+  ZOOM_NAV_MIN_ACTIVE,
+  isMobileViewport,
+} from '../lib/navCamera';
+import {
   bearingDeg,
-  destinationPoint,
   distanceToRouteKm,
   haversineKm,
   smoothBearingDeg,
@@ -47,43 +55,7 @@ interface MapViewProps {
 }
 
 const ZOOM_HOME = 15;
-/** Inclinação 3D estilo Waze — mostra horizonte sem “colar” na rua. */
-const NAV_PITCH = 55;
-const NAV_PITCH_MOBILE = 48;
-/** Zoom de navegação — meio-termo entre visão Waze e street-level. */
-const ZOOM_NAV_FLAT = 17;
-const ZOOM_NAV_MAX = 18;
-
-/** Zoom fixo na navegação 3D (pitch não altera — evita ficar longe ou colado). */
-function navTargetZoom(_pitch: number): number {
-  return isMobileViewport() ? 16.9 : 17.2;
-}
-
 const ZOOM_ROUTE_OVERVIEW_MAX = 13;
-
-/** Desloca levemente o centro à frente do carro para enquadrar a via. */
-function navCameraCenter(
-  lat: number,
-  lon: number,
-  bearing: number,
-  pitch = 0
-): { lat: number; lon: number } {
-  const mobile = isMobileViewport();
-  let forwardKm = mobile ? 0.065 : 0.08;
-  if (pitch > 35) forwardKm += mobile ? 0.025 : 0.03;
-  return destinationPoint(lat, lon, bearing, forwardKm);
-}
-
-/** Padding empurra o carro para a parte inferior da tela (HUD Waze). */
-function navCameraPadding(): { top: number; bottom: number; left: number; right: number } {
-  const mobile = isMobileViewport();
-  return {
-    top: mobile ? 118 : 88,
-    bottom: mobile ? 210 : 150,
-    left: mobile ? 28 : 36,
-    right: mobile ? 28 : 36,
-  };
-}
 const NAV_CAMERA_EASE_MS = 420;
 const ZOOM_PREVIEW_MAX = 12;
 const ZOOM_MIN_NAV = 10;
@@ -109,10 +81,6 @@ const GPS_HEADING_MIN_SPEED_MPS = 2.2;
 const GPS_ON_ROUTE_MAX_KM = 0.22;
 const NAV_SNAP_TO_START_MS = 45000;
 const NAV_CAMERA_GUARD_MS = 8000;
-
-function isMobileViewport(): boolean {
-  return typeof window !== 'undefined' && window.innerWidth < 768;
-}
 
 /** Mantém formato da via: distância mínima entre pontos, não pula vértices de canto. */
 function simplifyRoutePoints(
@@ -546,7 +514,7 @@ export default function MapView({
       routeRedrawRef.current?.(true);
     }, 450);
   }
-  const forceNavCameraRef = useRef<(forceRouteStart: boolean) => void>(() => {});
+  const forceNavCameraRef = useRef<(forceRouteStart: boolean, resetZoom?: boolean, force?: boolean) => void>(() => {});
   const lastRouteDrawMsRef = useRef(0);
   const lastNavBearingRef = useRef<number | null>(null);
   const navPitchEnabledRef = useRef(true);
@@ -675,23 +643,22 @@ export default function MapView({
           lastNavBearingRef.current
         );
         const bearing = smoothBearingDeg(lastNavBearingRef.current, rawHeading, 0.42);
+        if (!Number.isFinite(bearing)) return;
         lastNavBearingRef.current = bearing;
         lastAppliedHeadingRef.current = rawHeading;
 
-        const pitch = navPitchEnabledRef.current
-          ? isMobileViewport()
-            ? NAV_PITCH_MOBILE
-            : NAV_PITCH
-          : 0;
+        const pitch = navPitchEnabledRef.current ? navPitchForViewport() : 0;
         const cam = navCameraCenter(lat, lon, bearing, pitch);
         const targetZoom = navTargetZoom(pitch);
         const currentZoom = map.getCamera()?.zoom;
         const zoom =
-          opts?.resetZoom || opts?.force
-            ? targetZoom
-            : !followRef.current && currentZoom != null && Number.isFinite(currentZoom)
-              ? currentZoom
-              : targetZoom;
+          !followRef.current &&
+          !opts?.force &&
+          !opts?.resetZoom &&
+          currentZoom != null &&
+          Number.isFinite(currentZoom)
+            ? currentZoom
+            : targetZoom;
 
         markProgrammaticCamera();
         try {
@@ -1087,18 +1054,21 @@ export default function MapView({
         navCameraGuardUntilRef.current = Date.now() + NAV_CAMERA_GUARD_MS;
         lastNavBearingRef.current = null;
         manualExploreLockRef.current = false;
-        navPitchEnabledRef.current = !isMobileViewport();
+        navPitchEnabledRef.current = true;
         followRef.current = true;
         onFollowChangeRef.current?.(true);
       }
-      if (manualExploreLockRef.current || !followRef.current || routeOverviewRef.current) {
+      if (
+        !forceRouteStart &&
+        (manualExploreLockRef.current || !followRef.current || routeOverviewRef.current)
+      ) {
         routeRedrawRef.current?.(true);
         return;
       }
       lastCameraRef.current = null;
       lastFollowMsRef.current = 0;
       routeRedrawRef.current?.(true);
-      forceNavCamera(forceRouteStart);
+      forceNavCamera(forceRouteStart, true, true);
     },
     [forceNavCamera, syncNavAnchor]
   );
@@ -1119,24 +1089,11 @@ export default function MapView({
       runNavigationStartup(true);
       const t1 = setTimeout(() => {
         if (!manualExploreLockRef.current && followRef.current) {
-          runNavigationStartup(false);
+          forceNavCameraRef.current(false, true, true);
         }
       }, 600);
-      const t2 = setTimeout(() => {
-        if (
-          isMobileViewport() &&
-          modeRef.current === 'navigate' &&
-          followRef.current &&
-          !manualExploreLockRef.current &&
-          !routeOverviewRef.current
-        ) {
-          navPitchEnabledRef.current = true;
-          forceNavCameraRef.current(false);
-        }
-      }, 1400);
       return () => {
         clearTimeout(t1);
-        clearTimeout(t2);
       };
     }
   }, [mode, mapReady, navigationStartToken, runNavigationStartup]);
@@ -1300,7 +1257,7 @@ export default function MapView({
         navCameraGuardUntilRef.current = Date.now() + NAV_CAMERA_GUARD_MS;
         lastCameraRef.current = null;
         lastFollowMsRef.current = 0;
-        forceNavCamera(true);
+        forceNavCamera(true, true, true);
       } else {
         try {
           map.setCamera(
@@ -1363,8 +1320,8 @@ export default function MapView({
       const zoom = cam?.zoom;
       const center = cam?.center;
       const snapActive = Date.now() < navSnapToStartUntilRef.current;
-      if (zoom == null || !Number.isFinite(zoom) || zoom < ZOOM_MIN_NAV) {
-        forceNavCamera(snapActive, true);
+      if (zoom == null || !Number.isFinite(zoom) || zoom < ZOOM_NAV_MIN_ACTIVE) {
+        forceNavCamera(snapActive, true, true);
         return;
       }
       if (!center || center.length < 2) {
