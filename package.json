@@ -1,0 +1,23 @@
+{
+  "name": "drive-navigator",
+  "version": "0.2.0",
+  "private": true,
+  "description": "App de roteiro personalizado para motoristas — Firebase Hosting + Render API",
+  "workspaces": [
+    "frontend",
+    "api",
+    "functions"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev -w frontend\" \"npm run start -w api\"",
+    "build": "npm run build -w frontend && npm run build -w api",
+    "build:all": "npm run build -w frontend && npm run build -w api && npm run build -w functions",
+    "deploy": "powershell -File scripts/deploy-hosting.ps1",
+    "deploy:hosting": "firebase deploy --only hosting",
+    "deploy:api:render": "powershell -File scripts/deploy-render.ps1"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "firebase-tools": "^13.30.0"
+  }
+}

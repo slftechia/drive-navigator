@@ -1,0 +1,8 @@
+{
+  "functionAppName": { "value": "drive-nav-api-dn001" },
+  "functionAppUrl": { "value": "https://drive-nav-api-dn001.azurewebsites.net" },
+  "staticWebAppName": { "value": "drive-nav-web-dn001" },
+  "staticWebAppUrl": { "value": "https://happy-plant-0be88df0f.7.azurestaticapps.net" },
+  "mapsAccountName": { "value": "drivenavmaps001" },
+  "resourceGroupName": { "value": "rg-drive-navigator" }
+}

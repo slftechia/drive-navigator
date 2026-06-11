@@ -1,0 +1,7 @@
+﻿az : ERROR: The content for this response was already consumed
+No C:\Users\bruno\AppData\Local\Temp\ps-script-0fbd5f87-0193-47ff-8c3e-acd374542f05.ps1:81 caractere:34
++ ... TOP\DRIVE"; az deployment group validate --resource-group rg-drive-na ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (ERROR: The cont...lready consumed:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
