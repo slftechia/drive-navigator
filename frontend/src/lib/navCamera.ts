@@ -22,7 +22,7 @@ export function navTargetZoom(pitch: number): number {
   );
 }
 
-/** Desloca centro à frente do carro — carro fica na parte inferior da tela. */
+/** Desloca centro à frente do carro — pequeno offset para enquadrar a via à frente. */
 export function navCameraCenter(
   lat: number,
   lon: number,
@@ -30,8 +30,8 @@ export function navCameraCenter(
   pitch = 0
 ): { lat: number; lon: number } {
   const mobile = isMobileViewport();
-  let forwardKm = mobile ? 0.048 : 0.062;
-  if (pitch > 35) forwardKm += mobile ? 0.012 : 0.01;
+  let forwardKm = mobile ? 0.022 : 0.028;
+  if (pitch > 35) forwardKm += mobile ? 0.008 : 0.01;
   return destinationPoint(lat, lon, bearing, forwardKm);
 }
 

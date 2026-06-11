@@ -259,6 +259,7 @@ class AtlasMap {
     if (options.touchRotate === false) this.map.touchZoomRotate.disableRotation();
     if (options.scrollZoomInteraction === false) this.map.scrollZoom.disable();
     if (options.dblClickZoomInteraction === false) this.map.doubleClickZoom.disable();
+    if (this.map.touchPitch?.enable) this.map.touchPitch.enable();
   }
 
   getCamera() {
@@ -272,6 +273,11 @@ class AtlasMap {
   }
 
   setCamera(options: CameraOptions, transition?: CameraTransition) {
+    if (!this.map.isStyleLoaded()) {
+      this.map.once('load', () => this.setCamera(options, transition));
+      return;
+    }
+
     const duration = transition?.type === 'jump' || transition?.duration === 0 ? 0 : transition?.duration ?? 0;
 
     if (options.minZoom != null) this.map.setMinZoom(options.minZoom);
@@ -297,21 +303,44 @@ class AtlasMap {
       return;
     }
 
+    const padding =
+      options.padding != null
+        ? typeof options.padding === 'number'
+          ? { top: options.padding, bottom: options.padding, left: options.padding, right: options.padding }
+          : options.padding
+        : undefined;
+
+    if (padding) this.map.setPadding(padding);
+
     const move: maplibregl.CameraOptions = {};
     if (options.center) move.center = options.center;
     if (options.zoom != null && Number.isFinite(options.zoom)) move.zoom = options.zoom;
     if (options.bearing != null && Number.isFinite(options.bearing)) move.bearing = options.bearing;
     if (options.pitch != null && Number.isFinite(options.pitch)) move.pitch = options.pitch;
-    if (options.padding != null) {
-      if (typeof options.padding === 'number') {
-        this.map.setPadding({ top: options.padding, bottom: options.padding, left: options.padding, right: options.padding });
-      } else {
-        this.map.setPadding(options.padding);
-      }
-    }
+    if (padding) move.padding = padding;
 
     if (duration > 0) this.map.easeTo({ ...move, duration });
     else this.map.jumpTo(move);
+  }
+
+  applyNavigationCamera(
+    center: Position,
+    zoom: number,
+    bearing: number,
+    pitch: number,
+    padding: PaddingOptions,
+    animate = false
+  ) {
+    if (!this.map.isStyleLoaded()) {
+      this.map.once('load', () =>
+        this.applyNavigationCamera(center, zoom, bearing, pitch, padding, animate)
+      );
+      return;
+    }
+    this.map.setPadding(padding);
+    const cam: maplibregl.CameraOptions = { center, zoom, bearing, pitch, padding };
+    if (animate) this.map.easeTo({ ...cam, duration: 420 });
+    else this.map.jumpTo(cam);
   }
 
   setUserInteraction(opts: {

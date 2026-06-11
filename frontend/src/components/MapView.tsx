@@ -642,68 +642,25 @@ export default function MapView({
           lastVehiclePosRef.current,
           lastNavBearingRef.current
         );
-        const bearing = smoothBearingDeg(lastNavBearingRef.current, rawHeading, 0.42);
-        if (!Number.isFinite(bearing)) return;
+        let bearing = smoothBearingDeg(lastNavBearingRef.current, rawHeading, 0.42);
+        if (!Number.isFinite(bearing)) bearing = 0;
         lastNavBearingRef.current = bearing;
         lastAppliedHeadingRef.current = rawHeading;
 
-        const pitch = navPitchEnabledRef.current ? navPitchForViewport() : 0;
+        const pitch = navPitchForViewport();
         const cam = navCameraCenter(lat, lon, bearing, pitch);
         const targetZoom = navTargetZoom(pitch);
-        const currentZoom = map.getCamera()?.zoom;
-        const zoom =
-          !followRef.current &&
-          !opts?.force &&
-          !opts?.resetZoom &&
-          currentZoom != null &&
-          Number.isFinite(currentZoom)
-            ? currentZoom
-            : targetZoom;
+        const padding = navCameraPadding();
 
         markProgrammaticCamera();
-        try {
-          map.setCamera(
-            {
-              center: [cam.lon, cam.lat],
-              zoom,
-              bearing,
-              pitch,
-              padding: navCameraPadding(),
-            },
-            transition
-          );
-        } catch {
-          navPitchEnabledRef.current = false;
-          markProgrammaticCamera();
-          try {
-            map.setCamera(
-              {
-                center: [cam.lon, cam.lat],
-                zoom: opts?.resetZoom ? navTargetZoom(0) : zoom,
-                bearing,
-                pitch: 0,
-                padding: navCameraPadding(),
-              },
-              transition
-            );
-          } catch {
-            markProgrammaticCamera();
-            try {
-              map.setCamera(
-                {
-                  center: [lon, lat],
-                  zoom: navTargetZoom(0),
-                  bearing: 0,
-                  pitch: 0,
-                  padding: navCameraPadding(),
-                },
-                CAMERA_JUMP
-              );
-            } catch {
-              return;
-            }
-          }
-        }
+        map.applyNavigationCamera(
+          [cam.lon, cam.lat],
+          targetZoom,
+          bearing,
+          pitch,
+          padding,
+          animate
+        );
       } else {
         try {
           map.setCamera(
@@ -725,13 +682,14 @@ export default function MapView({
       if (modeRef.current === 'navigate' && !followRef.current && !routeOverviewRef.current && !force) {
         return;
       }
-      const focus = resolveNavFocusNow(forceRouteStart);
+      // Câmera sempre no GPS atual (snap na rota), não no início da rota.
+      const focus = resolveNavFocusNow(false);
       if (!isValidCoord(focus.lat, focus.lon)) return;
       lastFollowMsRef.current = Date.now();
       setCameraToFocus(focus, {
         heading: userHeading,
-        animate: !forceRouteStart,
-        resetZoom,
+        animate: !forceRouteStart && !force,
+        resetZoom: resetZoom || force,
         force,
       });
     },
@@ -1305,6 +1263,37 @@ export default function MapView({
       /* ignore */
     }
   }, [mapReady, routeOverviewActive, followingGps, mode]);
+
+  useEffect(() => {
+    if (!mapReady || mode !== 'navigate') return;
+    manualExploreLockRef.current = false;
+    navFollowPauseUntilRef.current = 0;
+    navPitchEnabledRef.current = true;
+    const t = window.setTimeout(() => {
+      forceNavCameraRef.current(true, true, true);
+    }, 50);
+    return () => window.clearTimeout(t);
+  }, [mapReady, mode, navigationStartToken]);
+
+  useEffect(() => {
+    if (!mapReady || mode !== 'navigate' || !followingGps || routeOverviewActive) return;
+    const enforce = () => {
+      if (modeRef.current !== 'navigate' || !followRef.current || routeOverviewRef.current) return;
+      const map = mapInstance.current;
+      if (!map) return;
+      const cam = map.getCamera();
+      const zoom = cam?.zoom ?? 0;
+      const pitch = cam?.pitch ?? 0;
+      if (zoom < ZOOM_NAV_MIN_ACTIVE - 0.5 || pitch < 25) {
+        manualExploreLockRef.current = false;
+        navFollowPauseUntilRef.current = 0;
+        forceNavCameraRef.current(false, true, true);
+      }
+    };
+    enforce();
+    const id = window.setInterval(enforce, 2000);
+    return () => window.clearInterval(id);
+  }, [mapReady, mode, followingGps, routeOverviewActive, navigationStartToken]);
 
   useEffect(() => {
     if (!mapReadyRef.current || mode !== 'navigate') return;
