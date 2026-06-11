@@ -151,17 +151,29 @@ export async function searchSuggestions(
   lat?: number,
   lon?: number
 ): Promise<AddressSuggestion[]> {
-  const params = new URLSearchParams({ q: query });
+  const trimmed = query.trim();
+  if (trimmed.length < 3) return [];
+
+  // Autocomplete: Photon direto no browser (rapido; evita cold start do Render Free).
+  try {
+    const { searchSuggestionsDirect } = await import('./lib/mapsSearch');
+    const direct = await searchSuggestionsDirect(trimmed, lat, lon);
+    if (direct.length > 0) return direct;
+  } catch {
+    /* tenta API abaixo */
+  }
+
+  const params = new URLSearchParams({ q: trimmed });
   if (lat !== undefined) params.set('lat', String(lat));
   if (lon !== undefined) params.set('lon', String(lon));
   try {
     const data = await apiFetch<{ suggestions: AddressSuggestion[] }>(
-      `/search/suggestions?${params.toString()}`
+      `/search/suggestions?${params.toString()}`,
+      { timeoutMs: 55000 }
     );
     return data.suggestions;
   } catch {
-    const { searchSuggestionsDirect } = await import('./lib/mapsSearch');
-    return searchSuggestionsDirect(query, lat, lon);
+    return [];
   }
 }
 

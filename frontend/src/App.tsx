@@ -133,6 +133,8 @@ export default function App() {
 
   useEffect(() => {
     checkHealth().then(() => setApiOk(true)).catch(() => setApiOk(false));
+    // Acorda API Render em background (rotas/planejamento).
+    void fetch(`${import.meta.env.VITE_API_URL ?? '/api'}/health`, { method: 'GET' }).catch(() => {});
   }, []);
 
   const resolveOrigin = useCallback((): { lat: number; lon: number; label: string } => {

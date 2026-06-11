@@ -1,4 +1,5 @@
 import type { AddressSuggestion } from '../api';
+import { haversineKm } from '../utils/geo';
 
 const PHOTON_BASE = 'https://photon.komoot.io';
 const PHOTON_BR_BBOX = '-73.99,-33.75,-34.79,5.27';
@@ -124,7 +125,30 @@ function photonStateCode(state?: string): string {
   return normalizeStateCode(undefined, state);
 }
 
-/** Busca direta no Photon (OSM) quando a API estiver indisponível. */
+function rankSuggestions(
+  results: AddressSuggestion[],
+  query: string,
+  lat?: number,
+  lon?: number
+): AddressSuggestion[] {
+  const q = query.trim().toLowerCase();
+  const score = (s: AddressSuggestion) => {
+    let pts = 0;
+    const city = s.city.toLowerCase();
+    const name = s.placeName.toLowerCase();
+    const label = s.label.toLowerCase();
+    if (city === q || name === q) pts += 200;
+    else if (city.startsWith(q) || name.startsWith(q) || label.startsWith(q)) pts += 120;
+    else if (city.includes(q) || name.includes(q)) pts += 40;
+    if (lat != null && lon != null && Number.isFinite(lat) && Number.isFinite(lon)) {
+      pts -= haversineKm(lat, lon, s.lat, s.lon) * 2;
+    }
+    return pts;
+  };
+  return [...results].sort((a, b) => score(b) - score(a));
+}
+
+/** Busca direta no Photon (OSM) — rapida, funciona sem API Render. */
 export async function searchSuggestionsDirect(
   query: string,
   lat?: number,
@@ -134,7 +158,7 @@ export async function searchSuggestionsDirect(
 
   const url = new URL(`${PHOTON_BASE}/api/`);
   url.searchParams.set('q', query.trim());
-  url.searchParams.set('limit', '8');
+  url.searchParams.set('limit', '12');
   url.searchParams.set('bbox', PHOTON_BR_BBOX);
   if (lat !== undefined && lon !== undefined) {
     url.searchParams.set('lat', String(lat));
@@ -151,29 +175,34 @@ export async function searchSuggestionsDirect(
     }>;
   };
 
-  return (data.features ?? [])
-    .filter((f) => {
-      const cc = String(f.properties.countrycode ?? f.properties.country ?? '').toUpperCase();
-      return !cc || cc === 'BR';
-    })
-    .map((f) => {
-    const [lonVal, latVal] = f.geometry.coordinates;
-    const props = f.properties;
-    const name = String(props.name ?? props.street ?? props.city ?? 'Destino').trim();
-    const city = String(props.city ?? props.county ?? '').trim();
-    const district = String(props.district ?? props.locality ?? '').trim();
-    const stateCode = photonStateCode(String(props.state ?? ''));
-    const address: AddressFields = {
-      freeformAddress: [name, props.street, city, stateCode].filter(Boolean).join(', '),
-      municipality: city,
-      municipalitySubdivision: district,
-      countrySubdivision: String(props.state ?? ''),
-      countrySubdivisionCode: stateCode,
-    };
-    return parseSuggestion({
-      id: String(props.osm_id ?? `${latVal}-${lonVal}`),
-      address,
-      position: { lat: latVal, lon: lonVal },
-    });
-  });
+  return rankSuggestions(
+    (data.features ?? [])
+      .filter((f) => {
+        const cc = String(f.properties.countrycode ?? f.properties.country ?? '').toUpperCase();
+        return !cc || cc === 'BR';
+      })
+      .map((f) => {
+        const [lonVal, latVal] = f.geometry.coordinates;
+        const props = f.properties;
+        const name = String(props.name ?? props.street ?? props.city ?? 'Destino').trim();
+        const city = String(props.city ?? props.county ?? '').trim();
+        const district = String(props.district ?? props.locality ?? '').trim();
+        const stateCode = photonStateCode(String(props.state ?? ''));
+        const address: AddressFields = {
+          freeformAddress: [name, props.street, city, stateCode].filter(Boolean).join(', '),
+          municipality: city,
+          municipalitySubdivision: district,
+          countrySubdivision: String(props.state ?? ''),
+          countrySubdivisionCode: stateCode,
+        };
+        return parseSuggestion({
+          id: String(props.osm_id ?? `${latVal}-${lonVal}`),
+          address,
+          position: { lat: latVal, lon: lonVal },
+        });
+      }),
+    query,
+    lat,
+    lon
+  ).slice(0, 8);
 }
