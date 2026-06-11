@@ -47,19 +47,25 @@ interface MapViewProps {
 }
 
 const ZOOM_HOME = 15;
-const NAV_PITCH = 60;
-const NAV_PITCH_MOBILE = 50;
-const ZOOM_NAV_FLAT = 17.5;
-const ZOOM_NAV_MAX = 20;
+/** Inclinação 3D estilo Waze — mostra horizonte sem “colar” na rua. */
+const NAV_PITCH = 55;
+const NAV_PITCH_MOBILE = 48;
+/** Zoom de navegação: ~15–16 (Waze). Valores 17+ deixam a tela muito ampliada. */
+const ZOOM_NAV_FLAT = 16;
+const ZOOM_NAV_MAX = 17;
 const ZOOM_ROUTE_OVERVIEW_MAX = 13;
 
-/** Com inclinação 3D o mapa mostra mais área — compensa aumentando o zoom. */
+/** Zoom alvo na navegação 3D — mais afastado que street-level extremo. */
 function navTargetZoom(pitch: number): number {
-  const flat = isMobileViewport() ? ZOOM_NAV_FLAT : 17;
-  if (pitch <= 0) return flat;
-  return Math.min(ZOOM_NAV_MAX, flat + pitch * 0.038 + (isMobileViewport() ? 0.6 : 0.3));
+  const mobile = isMobileViewport();
+  const base = mobile ? 15.6 : 16;
+  if (pitch <= 0) return base;
+  // Com pitch alto o horizonte já mostra mais área — não aumentar zoom.
+  const adjusted = base - pitch * 0.006;
+  return Math.max(mobile ? 14.8 : 15.2, Math.min(ZOOM_NAV_MAX, adjusted));
 }
-/** Desloca centro à frente do carro — equilíbrio entre curva visível e ícone na tela. */
+
+/** Desloca levemente o centro à frente do carro para enquadrar a via. */
 function navCameraCenter(
   lat: number,
   lon: number,
@@ -67,9 +73,20 @@ function navCameraCenter(
   pitch = 0
 ): { lat: number; lon: number } {
   const mobile = isMobileViewport();
-  let forwardKm = mobile ? 0.048 : 0.062;
-  if (pitch > 35) forwardKm += mobile ? 0.012 : 0.01;
+  let forwardKm = mobile ? 0.09 : 0.11;
+  if (pitch > 35) forwardKm += mobile ? 0.035 : 0.04;
   return destinationPoint(lat, lon, bearing, forwardKm);
+}
+
+/** Padding empurra o carro para a parte inferior da tela (HUD Waze). */
+function navCameraPadding(): { top: number; bottom: number; left: number; right: number } {
+  const mobile = isMobileViewport();
+  return {
+    top: mobile ? 118 : 88,
+    bottom: mobile ? 210 : 150,
+    left: mobile ? 28 : 36,
+    right: mobile ? 28 : 36,
+  };
 }
 const NAV_CAMERA_EASE_MS = 420;
 const ZOOM_PREVIEW_MAX = 12;
@@ -672,9 +689,9 @@ export default function MapView({
         const targetZoom = navTargetZoom(pitch);
         const currentZoom = map.getCamera()?.zoom;
         const zoom =
-          opts?.resetZoom || currentZoom == null || !Number.isFinite(currentZoom)
-            ? targetZoom
-            : currentZoom;
+          !followRef.current && currentZoom != null && Number.isFinite(currentZoom)
+            ? currentZoom
+            : targetZoom;
 
         markProgrammaticCamera();
         try {
@@ -684,6 +701,7 @@ export default function MapView({
               zoom,
               bearing,
               pitch,
+              padding: navCameraPadding(),
             },
             transition
           );
@@ -697,6 +715,7 @@ export default function MapView({
                 zoom: opts?.resetZoom ? navTargetZoom(0) : zoom,
                 bearing,
                 pitch: 0,
+                padding: navCameraPadding(),
               },
               transition
             );
@@ -709,6 +728,7 @@ export default function MapView({
                   zoom: navTargetZoom(0),
                   bearing: 0,
                   pitch: 0,
+                  padding: navCameraPadding(),
                 },
                 CAMERA_JUMP
               );
@@ -911,14 +931,14 @@ export default function MapView({
           lineCap: 'round',
         }),
         new atlas.layer.LineLayer(routeDs, 'route-outline', {
-          strokeColor: '#0c4a6e',
-          strokeWidth: 14,
+          strokeColor: '#4c1d95',
+          strokeWidth: 12,
           lineJoin: 'round',
           lineCap: 'round',
         }),
         new atlas.layer.LineLayer(routeDs, 'route-line', {
-          strokeColor: '#0ea5e9',
-          strokeWidth: 9,
+          strokeColor: '#7c3aed',
+          strokeWidth: 8,
           lineJoin: 'round',
           lineCap: 'round',
         }),
