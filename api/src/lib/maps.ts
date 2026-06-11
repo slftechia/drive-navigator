@@ -161,19 +161,94 @@ function photonStateCode(state?: string): string {
   return normalizeStateCode(undefined, normalized);
 }
 
+function normalizeForMatch(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+const ADMIN_PLACE_TYPES = new Set([
+  'city', 'town', 'village', 'hamlet', 'municipality', 'locality',
+  'district', 'suburb', 'neighbourhood', 'neighborhood', 'county', 'state',
+]);
+
+function startsWithQuery(text: string, queryNorm: string): boolean {
+  const t = normalizeForMatch(text);
+  return t.length > 0 && t.startsWith(queryNorm);
+}
+
+function isRelevantPhotonMatch(
+  props: Record<string, string | number | undefined>,
+  rawQuery: string
+): boolean {
+  const q = normalizeForMatch(rawQuery);
+  if (q.length < 3) return false;
+
+  const type = normalizeForMatch(String(props.type ?? props.osm_value ?? ''));
+  const name = String(props.name ?? '').trim();
+  const city = String(props.city ?? '').trim();
+  const district = String(props.district ?? props.locality ?? '').trim();
+  const county = String(props.county ?? '').trim();
+  const street = String(props.street ?? '').trim();
+
+  if (city && startsWithQuery(city, q)) return true;
+  if (county && startsWithQuery(county, q)) return true;
+  if (ADMIN_PLACE_TYPES.has(type) && name && startsWithQuery(name, q)) return true;
+  if (ADMIN_PLACE_TYPES.has(type) && district && startsWithQuery(district, q)) return true;
+
+  if (type === 'street') {
+    const cityMatch = city.length > 0 && startsWithQuery(city, q);
+    if (street && startsWithQuery(street, q)) return q.length >= 5 || cityMatch;
+    if (name && startsWithQuery(name, q)) return q.length >= 5 || cityMatch;
+    return false;
+  }
+
+  if (!ADMIN_PLACE_TYPES.has(type)) return false;
+  return false;
+}
+
+function rankPhotonSuggestions(
+  results: AddressSuggestion[],
+  query: string,
+  lat?: number,
+  lon?: number
+): AddressSuggestion[] {
+  const q = normalizeForMatch(query);
+  const score = (s: AddressSuggestion) => {
+    let pts = 0;
+    const city = normalizeForMatch(s.city);
+    const name = normalizeForMatch(s.placeName);
+    if (city === q || name === q) pts += 2000;
+    else if (city.startsWith(q)) pts += 1200;
+    else if (name.startsWith(q)) pts += 800;
+    if (lat != null && lon != null) pts -= haversineKm(lat, lon, s.lat, s.lon) * 4;
+    return pts;
+  };
+  return [...results].sort((a, b) => score(b) - score(a));
+}
+
 function parsePhotonFeature(f: {
   geometry: { coordinates: [number, number] };
   properties: Record<string, string | number | undefined>;
 }): AddressSuggestion {
   const [lon, lat] = f.geometry.coordinates;
   const props = f.properties;
-  const name = String(props.name ?? props.street ?? props.city ?? 'Destino').trim();
+  const osmType = String(props.type ?? props.osm_value ?? '').toLowerCase();
   const city = String(props.city ?? props.county ?? '').trim();
   const district = String(props.district ?? props.locality ?? '').trim();
   const stateCode = photonStateCode(String(props.state ?? ''));
+  const rawName = String(props.name ?? '').trim();
+
+  let placeName = city || rawName || district || 'Destino';
+  if (['city', 'town', 'village', 'hamlet', 'municipality'].includes(osmType) && rawName) {
+    placeName = rawName;
+  }
+
   const address: AddressFields = {
-    freeformAddress: [name, props.street, city, stateCode].filter(Boolean).join(', '),
-    municipality: city,
+    freeformAddress: [placeName, props.street, city, stateCode].filter(Boolean).join(', '),
+    municipality: city || placeName,
     municipalitySubdivision: district,
     countrySubdivision: String(props.state ?? ''),
     countrySubdivisionCode: stateCode,
@@ -193,33 +268,46 @@ export async function searchAddressSuggestions(
 ): Promise<AddressSuggestion[]> {
   if (query.trim().length < 3) return [];
 
-  const url = new URL(`${PHOTON_BASE}/api/`);
-  url.searchParams.set('q', query.trim());
-  url.searchParams.set('limit', String(options?.limit ?? 8));
-  url.searchParams.set('bbox', PHOTON_BR_BBOX);
-  if (options?.lat !== undefined && options?.lon !== undefined) {
-    url.searchParams.set('lat', String(options.lat));
-    url.searchParams.set('lon', String(options.lon));
+  async function fetchLayer(layers?: string[]) {
+    const url = new URL(`${PHOTON_BASE}/api/`);
+    url.searchParams.set('q', query.trim());
+    url.searchParams.set('limit', String(options?.limit ?? 15));
+    url.searchParams.set('bbox', PHOTON_BR_BBOX);
+    if (layers?.length) {
+      for (const layer of layers) url.searchParams.append('layer', layer);
+    }
+    if (options?.lat !== undefined && options?.lon !== undefined) {
+      url.searchParams.set('lat', String(options.lat));
+      url.searchParams.set('lon', String(options.lon));
+    }
+    const res = await fetch(url.toString(), {
+      headers: { Accept: 'application/json', 'User-Agent': USER_AGENT },
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as {
+      features?: Array<{
+        geometry: { coordinates: [number, number] };
+        properties: Record<string, string | number | undefined>;
+      }>;
+    };
+    return (data.features ?? []).filter((f) => {
+      const cc = String(f.properties.countrycode ?? f.properties.country ?? '').toUpperCase();
+      return (!cc || cc === 'BR') && isRelevantPhotonMatch(f.properties, query);
+    });
   }
 
-  const res = await fetch(url.toString(), {
-    headers: { Accept: 'application/json', 'User-Agent': USER_AGENT },
-  });
-  if (!res.ok) return [];
+  let features = await fetchLayer(['city', 'district', 'locality', 'county']);
+  if (features.length < 4) {
+    const streets = await fetchLayer(['street']);
+    const seen = new Set(features.map((f) => String(f.properties.osm_id)));
+    for (const f of streets) {
+      const id = String(f.properties.osm_id);
+      if (!seen.has(id)) features.push(f);
+    }
+  }
 
-  const data = (await res.json()) as {
-    features?: Array<{
-      geometry: { coordinates: [number, number] };
-      properties: Record<string, string | number | undefined>;
-    }>;
-  };
-
-  return (data.features ?? [])
-    .filter((f) => {
-      const cc = String(f.properties.countrycode ?? f.properties.country ?? '').toUpperCase();
-      return !cc || cc === 'BR';
-    })
-    .map(parsePhotonFeature);
+  const suggestions = features.map(parsePhotonFeature);
+  return rankPhotonSuggestions(suggestions, query, options?.lat, options?.lon).slice(0, options?.limit ?? 8);
 }
 
 export interface RouteWaypoint {
@@ -445,7 +533,6 @@ async function fetchOsrmRoutes(options: RouteOptions): Promise<OsrmRoute[]> {
   url.searchParams.set('geometries', 'polyline');
   url.searchParams.set('steps', 'true');
   url.searchParams.set('alternatives', 'true');
-  url.searchParams.set('language', 'pt');
 
   const res = await fetch(url.toString(), {
     headers: { Accept: 'application/json', 'User-Agent': USER_AGENT },

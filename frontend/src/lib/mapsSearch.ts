@@ -1,9 +1,9 @@
 import type { AddressSuggestion } from '../api';
-import { haversineKm } from '../utils/geo';
-
-const PHOTON_BASE = 'https://photon.komoot.io';
-const PHOTON_BR_BBOX = '-73.99,-33.75,-34.79,5.27';
-const MIN_QUERY_LEN = 3;
+import {
+  MIN_QUERY_LEN,
+  fetchPhotonFeatures,
+  rankSuggestions,
+} from './photonSearch';
 
 interface AddressFields {
   freeformAddress?: string;
@@ -84,31 +84,20 @@ function formatLocationTag(address?: AddressFields, placeName?: string): string 
 function parseSuggestion(r: {
   id: string;
   address?: AddressFields;
-  poi?: { name: string };
   position: { lat: number; lon: number };
 }): AddressSuggestion {
   const addr = r.address;
-  const poiName = r.poi?.name?.trim();
   const city = addr?.municipality?.trim() ?? '';
   const district = addr?.municipalitySubdivision?.trim() ?? '';
   const stateCode = normalizeStateCode(addr?.countrySubdivisionCode, addr?.countrySubdivision);
 
-  let placeName = poiName || city || district || addr?.freeformAddress?.split(',')[0]?.trim() || 'Destino';
-  if (!poiName && district && city && district.toLowerCase() !== city.toLowerCase()) {
-    placeName = district;
-  }
-
+  const placeName = city || district || addr?.freeformAddress?.split(',')[0]?.trim() || 'Destino';
   const locationTag = formatLocationTag(addr, placeName);
-  const label = poiName
-    ? locationTag
-      ? `${poiName} — ${locationTag}`
-      : poiName
-    : locationTag || placeName;
-  const freeform = addr?.freeformAddress ?? label;
+  const freeform = addr?.freeformAddress ?? locationTag;
 
   return {
     id: r.id,
-    label,
+    label: locationTag || placeName,
     placeName,
     city: city || placeName,
     stateCode,
@@ -125,30 +114,68 @@ function photonStateCode(state?: string): string {
   return normalizeStateCode(undefined, state);
 }
 
-function rankSuggestions(
-  results: AddressSuggestion[],
-  query: string,
-  lat?: number,
-  lon?: number
-): AddressSuggestion[] {
-  const q = query.trim().toLowerCase();
-  const score = (s: AddressSuggestion) => {
-    let pts = 0;
-    const city = s.city.toLowerCase();
-    const name = s.placeName.toLowerCase();
-    const label = s.label.toLowerCase();
-    if (city === q || name === q) pts += 200;
-    else if (city.startsWith(q) || name.startsWith(q) || label.startsWith(q)) pts += 120;
-    else if (city.includes(q) || name.includes(q)) pts += 40;
-    if (lat != null && lon != null && Number.isFinite(lat) && Number.isFinite(lon)) {
-      pts -= haversineKm(lat, lon, s.lat, s.lon) * 2;
-    }
-    return pts;
+function featureToSuggestion(f: {
+  geometry: { coordinates: [number, number] };
+  properties: Record<string, string | number | undefined>;
+}): AddressSuggestion {
+  const [lonVal, latVal] = f.geometry.coordinates;
+  const props = f.properties;
+  const osmType = String(props.type ?? props.osm_value ?? '').toLowerCase();
+  const city = String(props.city ?? props.county ?? '').trim();
+  const district = String(props.district ?? props.locality ?? '').trim();
+  const stateCode = photonStateCode(String(props.state ?? ''));
+  const street = String(props.street ?? '').trim();
+  const rawName = String(props.name ?? '').trim();
+
+  let placeName = city || rawName || district || 'Destino';
+  if (['city', 'town', 'village', 'hamlet', 'municipality'].includes(osmType) && rawName) {
+    placeName = rawName;
+  }
+
+  const address: AddressFields = {
+    freeformAddress: [placeName, street, city, stateCode].filter(Boolean).join(', '),
+    municipality: city || placeName,
+    municipalitySubdivision: district,
+    countrySubdivision: String(props.state ?? ''),
+    countrySubdivisionCode: stateCode,
   };
-  return [...results].sort((a, b) => score(b) - score(a));
+
+  return parseSuggestion({
+    id: String(props.osm_id ?? `${latVal}-${lonVal}`),
+    address,
+    position: { lat: latVal, lon: lonVal },
+  });
 }
 
-/** Busca direta no Photon (OSM) — rapida, funciona sem API Render. */
+function dedupeSuggestions(items: AddressSuggestion[]): AddressSuggestion[] {
+  const seen = new Set<string>();
+  const out: AddressSuggestion[] = [];
+  for (const s of items) {
+    const key = `${s.lat.toFixed(4)}-${s.lon.toFixed(4)}-${s.locationTag}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
+}
+
+function mergeFeatures(
+  primary: Awaited<ReturnType<typeof fetchPhotonFeatures>>,
+  extra: Awaited<ReturnType<typeof fetchPhotonFeatures>>
+) {
+  const seen = new Set(primary.map((f) => String(f.properties.osm_id ?? f.geometry.coordinates.join(','))));
+  const merged = [...primary];
+  for (const f of extra) {
+    const k = String(f.properties.osm_id ?? f.geometry.coordinates.join(','));
+    if (!seen.has(k)) {
+      seen.add(k);
+      merged.push(f);
+    }
+  }
+  return merged;
+}
+
+/** Busca direta no Photon (OSM) — cidades e bairros relacionados ao texto digitado. */
 export async function searchSuggestionsDirect(
   query: string,
   lat?: number,
@@ -156,53 +183,15 @@ export async function searchSuggestionsDirect(
 ): Promise<AddressSuggestion[]> {
   if (query.trim().length < MIN_QUERY_LEN) return [];
 
-  const url = new URL(`${PHOTON_BASE}/api/`);
-  url.searchParams.set('q', query.trim());
-  url.searchParams.set('limit', '12');
-  url.searchParams.set('bbox', PHOTON_BR_BBOX);
-  if (lat !== undefined && lon !== undefined) {
-    url.searchParams.set('lat', String(lat));
-    url.searchParams.set('lon', String(lon));
+  const opts = { lat, lon, limit: 15 };
+  const adminLayers = ['city', 'district', 'locality', 'county'];
+
+  let features = await fetchPhotonFeatures(query, { ...opts, layers: adminLayers });
+  if (features.length < 4) {
+    const streetFeats = await fetchPhotonFeatures(query, { ...opts, layers: ['street'] });
+    features = mergeFeatures(features, streetFeats);
   }
 
-  const res = await fetch(url.toString());
-  if (!res.ok) throw new Error(`Photon search ${res.status}`);
-
-  const data = (await res.json()) as {
-    features?: Array<{
-      geometry: { coordinates: [number, number] };
-      properties: Record<string, string | number | undefined>;
-    }>;
-  };
-
-  return rankSuggestions(
-    (data.features ?? [])
-      .filter((f) => {
-        const cc = String(f.properties.countrycode ?? f.properties.country ?? '').toUpperCase();
-        return !cc || cc === 'BR';
-      })
-      .map((f) => {
-        const [lonVal, latVal] = f.geometry.coordinates;
-        const props = f.properties;
-        const name = String(props.name ?? props.street ?? props.city ?? 'Destino').trim();
-        const city = String(props.city ?? props.county ?? '').trim();
-        const district = String(props.district ?? props.locality ?? '').trim();
-        const stateCode = photonStateCode(String(props.state ?? ''));
-        const address: AddressFields = {
-          freeformAddress: [name, props.street, city, stateCode].filter(Boolean).join(', '),
-          municipality: city,
-          municipalitySubdivision: district,
-          countrySubdivision: String(props.state ?? ''),
-          countrySubdivisionCode: stateCode,
-        };
-        return parseSuggestion({
-          id: String(props.osm_id ?? `${latVal}-${lonVal}`),
-          address,
-          position: { lat: latVal, lon: lonVal },
-        });
-      }),
-    query,
-    lat,
-    lon
-  ).slice(0, 8);
+  const suggestions = features.map(featureToSuggestion);
+  return rankSuggestions(dedupeSuggestions(suggestions), query, lat, lon).slice(0, 8);
 }
