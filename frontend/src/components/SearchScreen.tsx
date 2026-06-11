@@ -11,8 +11,8 @@ interface SearchScreenProps {
   onPick: (dest: SelectedDestination) => void;
 }
 
-const DEBOUNCE_MS = 450;
-const MIN_QUERY_LEN = 2;
+const DEBOUNCE_MS = 350;
+const MIN_QUERY_LEN = 3;
 
 export default function SearchScreen({ userLat, userLon, originLabel, onBack, onPick }: SearchScreenProps) {
   const [query, setQuery] = useState('');

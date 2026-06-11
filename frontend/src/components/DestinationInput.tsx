@@ -68,7 +68,7 @@ export default function DestinationInput({
   const fetchSuggestions = useCallback(
     async (query: string) => {
       const trimmed = query.trim();
-      if (trimmed.length < 2) {
+      if (trimmed.length < 3) {
         requestIdRef.current += 1;
         setSuggestions([]);
         setDropdownOpen(false);
@@ -103,7 +103,7 @@ export default function DestinationInput({
   );
 
   useEffect(() => {
-    const timer = setTimeout(() => fetchSuggestions(value), 450);
+    const timer = setTimeout(() => fetchSuggestions(value), 350);
     return () => clearTimeout(timer);
   }, [value, fetchSuggestions]);
 

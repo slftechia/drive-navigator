@@ -1,5 +1,7 @@
 const NOMINATIM_BASE = 'https://nominatim.openstreetmap.org';
 const PHOTON_BASE = 'https://photon.komoot.io';
+/** Limita buscas ao Brasil (Photon não aceita lang=pt). */
+const PHOTON_BR_BBOX = '-73.99,-33.75,-34.79,5.27';
 const OSRM_BASE = 'https://router.project-osrm.org';
 const OVERPASS_ENDPOINTS = [
   'https://overpass.kumi.systems/api/interpreter',
@@ -189,12 +191,12 @@ export async function searchAddressSuggestions(
   query: string,
   options?: { lat?: number; lon?: number; limit?: number }
 ): Promise<AddressSuggestion[]> {
-  if (query.trim().length < 2) return [];
+  if (query.trim().length < 3) return [];
 
   const url = new URL(`${PHOTON_BASE}/api/`);
   url.searchParams.set('q', query.trim());
-  url.searchParams.set('lang', 'pt');
   url.searchParams.set('limit', String(options?.limit ?? 8));
+  url.searchParams.set('bbox', PHOTON_BR_BBOX);
   if (options?.lat !== undefined && options?.lon !== undefined) {
     url.searchParams.set('lat', String(options.lat));
     url.searchParams.set('lon', String(options.lon));
@@ -212,7 +214,12 @@ export async function searchAddressSuggestions(
     }>;
   };
 
-  return (data.features ?? []).map(parsePhotonFeature);
+  return (data.features ?? [])
+    .filter((f) => {
+      const cc = String(f.properties.countrycode ?? f.properties.country ?? '').toUpperCase();
+      return !cc || cc === 'BR';
+    })
+    .map(parsePhotonFeature);
 }
 
 export interface RouteWaypoint {

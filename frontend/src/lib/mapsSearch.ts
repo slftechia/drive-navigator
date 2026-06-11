@@ -1,6 +1,8 @@
 import type { AddressSuggestion } from '../api';
 
 const PHOTON_BASE = 'https://photon.komoot.io';
+const PHOTON_BR_BBOX = '-73.99,-33.75,-34.79,5.27';
+const MIN_QUERY_LEN = 3;
 
 interface AddressFields {
   freeformAddress?: string;
@@ -128,12 +130,12 @@ export async function searchSuggestionsDirect(
   lat?: number,
   lon?: number
 ): Promise<AddressSuggestion[]> {
-  if (query.trim().length < 2) return [];
+  if (query.trim().length < MIN_QUERY_LEN) return [];
 
   const url = new URL(`${PHOTON_BASE}/api/`);
   url.searchParams.set('q', query.trim());
-  url.searchParams.set('lang', 'pt');
   url.searchParams.set('limit', '8');
+  url.searchParams.set('bbox', PHOTON_BR_BBOX);
   if (lat !== undefined && lon !== undefined) {
     url.searchParams.set('lat', String(lat));
     url.searchParams.set('lon', String(lon));
@@ -149,7 +151,12 @@ export async function searchSuggestionsDirect(
     }>;
   };
 
-  return (data.features ?? []).map((f) => {
+  return (data.features ?? [])
+    .filter((f) => {
+      const cc = String(f.properties.countrycode ?? f.properties.country ?? '').toUpperCase();
+      return !cc || cc === 'BR';
+    })
+    .map((f) => {
     const [lonVal, latVal] = f.geometry.coordinates;
     const props = f.properties;
     const name = String(props.name ?? props.street ?? props.city ?? 'Destino').trim();
