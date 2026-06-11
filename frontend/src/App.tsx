@@ -132,8 +132,10 @@ export default function App() {
   useEffect(() => { screenRef.current = screen; }, [screen]);
 
   useEffect(() => {
-    checkHealth().then(() => setApiOk(true)).catch(() => setApiOk(false));
-    // Acorda API Render em background (rotas/planejamento).
+    checkHealth()
+      .then(() => setApiOk(true))
+      .catch(() => setApiOk(false));
+    // Acorda API Render em background (cold start ~30–60s no plano free).
     void fetch(`${import.meta.env.VITE_API_URL ?? '/api'}/health`, { method: 'GET' }).catch(() => {});
   }, []);
 
@@ -282,7 +284,13 @@ export default function App() {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setError(msg.includes('AbortError') ? 'A requisição demorou demais. Tente novamente.' : msg);
+      setError(
+        msg.includes('AbortError') || msg.includes('demorou demais')
+          ? 'A requisição demorou demais. Tente novamente.'
+          : msg.includes('fetch failed') || msg.includes('Failed to fetch')
+            ? 'Sem conexão com o servidor. Verifique a internet e tente de novo.'
+            : msg
+      );
     } finally {
       setLoading(false);
     }

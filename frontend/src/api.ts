@@ -1,7 +1,30 @@
 const API_BASE = import.meta.env.VITE_API_URL ?? '/api';
 
 const API_TIMEOUT_MS = 25000;
-const PLAN_TRIP_TIMEOUT_MS = 60000;
+const PLAN_TRIP_TIMEOUT_MS = 90000;
+const API_RETRY_DELAY_MS = 2500;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isNetworkFetchError(err: unknown): boolean {
+  if (err instanceof TypeError) {
+    return /fetch failed|failed to fetch|networkerror|load failed/i.test(err.message);
+  }
+  return false;
+}
+
+function formatApiError(err: unknown): Error {
+  if (err instanceof DOMException && err.name === 'AbortError') {
+    return new Error('A requisição demorou demais. Tente novamente.');
+  }
+  if (isNetworkFetchError(err)) {
+    return new Error('Sem conexão com o servidor. Verifique a internet e tente de novo.');
+  }
+  if (err instanceof Error) return err;
+  return new Error(String(err));
+}
 
 export interface GeocodeResult {
   lat: number;
@@ -108,30 +131,40 @@ export interface VehicleConfig {
 
 async function apiFetch<T>(
   path: string,
-  options?: RequestInit & { timeoutMs?: number }
+  options?: RequestInit & { timeoutMs?: number; retries?: number }
 ): Promise<T> {
-  const { timeoutMs = API_TIMEOUT_MS, ...fetchOptions } = options ?? {};
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${API_BASE}${path}`, {
-      headers: { 'Content-Type': 'application/json', ...fetchOptions.headers },
-      signal: controller.signal,
-      ...fetchOptions,
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error((err as { error?: string }).error ?? `Erro na API (${res.status})`);
+  const { timeoutMs = API_TIMEOUT_MS, retries = 0, ...fetchOptions } = options ?? {};
+  let lastErr: unknown;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${API_BASE}${path}`, {
+        headers: { 'Content-Type': 'application/json', ...fetchOptions.headers },
+        signal: controller.signal,
+        ...fetchOptions,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        throw new Error((err as { error?: string }).error ?? `Erro na API (${res.status})`);
+      }
+      return (await res.json()) as T;
+    } catch (err) {
+      lastErr = err;
+      if (
+        attempt < retries &&
+        (isNetworkFetchError(err) || (err instanceof DOMException && err.name === 'AbortError'))
+      ) {
+        await sleep(API_RETRY_DELAY_MS);
+        continue;
+      }
+      throw formatApiError(err);
+    } finally {
+      clearTimeout(timer);
     }
-    return (await res.json()) as T;
-  } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new Error('A requisição demorou demais. Tente novamente.');
-    }
-    throw err;
-  } finally {
-    clearTimeout(timer);
   }
+  throw formatApiError(lastErr);
 }
 
 export async function checkHealth(): Promise<{ status: string }> {
@@ -240,11 +273,28 @@ export async function planTrip(params: {
   stopIntervalMinutes: number;
   categories?: string[];
 }): Promise<TripPlan> {
-  return apiFetch('/trip/plan', {
-    method: 'POST',
-    body: JSON.stringify(params),
-    timeoutMs: PLAN_TRIP_TIMEOUT_MS,
-  });
+  try {
+    return await apiFetch<TripPlan>('/trip/plan', {
+      method: 'POST',
+      body: JSON.stringify(params),
+      timeoutMs: PLAN_TRIP_TIMEOUT_MS,
+      retries: 1,
+    });
+  } catch (err) {
+    const raw = err instanceof Error ? err : new Error(String(err));
+    const canFallback =
+      isNetworkFetchError(err) ||
+      /demorou demais|servidor|conectar|fetch failed|failed to fetch|Erro na API \(5/i.test(raw.message);
+
+    if (!canFallback) throw raw;
+
+    try {
+      const { planTripDirect } = await import('./lib/tripPlanDirect');
+      return await planTripDirect(params);
+    } catch (directErr) {
+      throw directErr instanceof Error ? directErr : new Error(String(directErr));
+    }
+  }
 }
 
 export async function getFuelStatus(params: {
