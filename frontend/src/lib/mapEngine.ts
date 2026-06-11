@@ -30,7 +30,7 @@ export interface AtlasNamespace {
 
 declare global {
   interface Window {
-    atlas?: AtlasNamespace;
+    __driveNavAtlas?: AtlasNamespace;
   }
 }
 
@@ -364,11 +364,11 @@ function buildAtlasNamespace(): AtlasNamespace {
 
 /** Carrega o motor de mapas gratuito (MapLibre + OSM). Mantém nome legado para MapView. */
 export function loadAzureMaps(): Promise<AtlasNamespace> {
-  if (window.atlas) return Promise.resolve(window.atlas);
+  if (window.__driveNavAtlas) return Promise.resolve(window.__driveNavAtlas);
   if (loadPromise) return loadPromise;
 
   loadPromise = Promise.resolve(buildAtlasNamespace()).then((atlas) => {
-    window.atlas = atlas;
+    window.__driveNavAtlas = atlas;
     return atlas;
   });
 
