@@ -45,6 +45,18 @@ export function hazardMarkerHtml(zoom: number | null = null): string {
   </div>`;
 }
 
+/** Marcador genérico com emoji (alertas da comunidade). */
+export function communityAlertMarkerHtml(
+  emoji: string,
+  bg: string,
+  zoom: number | null = null,
+  label = 'Alerta'
+): string {
+  const px = alertMarkerSizePx(zoom);
+  const font = Math.max(12, Math.round(px * 0.48));
+  return `<div style="width:${px}px;height:${px}px;border-radius:50%;background:${bg};border:2.5px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;pointer-events:none;font-size:${font}px;line-height:1" aria-label="${label}">${emoji}</div>`;
+}
+
 export function fuelMarkerHtml(zoom: number | null = null, label?: string): string {
   const px = zoom != null && zoom >= 15 ? 34 : 28;
   const icon = Math.round(px * 0.5);

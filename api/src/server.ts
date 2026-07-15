@@ -19,7 +19,7 @@ import {
   queryCommunityReportsAlongRoute,
   queryCommunityReportsNear,
   reportsStats,
-  type CommunityReportType,
+  isCommunityReportType,
 } from './lib/reportsStore';
 
 export function createApp() {
@@ -286,10 +286,10 @@ export function createApp() {
         lon?: number;
         label?: string;
       };
-      const type = body.type as CommunityReportType | undefined;
+      const type = body.type;
       if (
         !type ||
-        (type !== 'radar' && type !== 'lombada' && type !== 'perigo') ||
+        !isCommunityReportType(type) ||
         body.lat == null ||
         body.lon == null ||
         !Number.isFinite(body.lat) ||

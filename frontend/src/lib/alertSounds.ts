@@ -1,40 +1,92 @@
 import type { RoadAlert } from '../api';
+import {
+  ALL_ALERT_TYPES,
+  alertTypeSpeak,
+  type RoadAlertType,
+} from './alertTypes';
 import { filterMapAlerts } from './roadAlerts';
+import { getVoicePersona, pickSystemVoiceForPersona } from './voicePersonas';
 import { haversineKm, routeProgressKm } from '../utils/geo';
+
+export type AlertTypeToggles = Record<RoadAlertType, boolean>;
 
 export interface AlertSoundSettings {
   master: boolean;
-  radar: boolean;
-  lombada: boolean;
+  muted: boolean;
+  /** Preferências por tipo de alerta (som). */
+  types: AlertTypeToggles;
   voice: boolean;
-  /** Voz das manobras (turn-by-turn) durante a navegação. */
   navGuidance: boolean;
+  /** Persona: alessandra, joao, etc. */
+  personaId: string;
+  voiceRate: number;
+  /** Legacy — ignorado se personaId existir. */
+  voiceURI?: string | null;
+  radar?: boolean;
+  lombada?: boolean;
+  perigo?: boolean;
+}
+
+export interface VoiceOption {
+  uri: string;
+  label: string;
+  lang: string;
 }
 
 const STORAGE_KEY = 'drive-nav-alert-sounds';
 
+function defaultTypeToggles(): AlertTypeToggles {
+  const o = {} as AlertTypeToggles;
+  for (const t of ALL_ALERT_TYPES) o[t] = true;
+  return o;
+}
+
 export const DEFAULT_ALERT_SOUND_SETTINGS: AlertSoundSettings = {
   master: true,
-  radar: true,
-  lombada: true,
+  muted: false,
+  types: defaultTypeToggles(),
   voice: true,
   navGuidance: true,
+  personaId: 'alessandra',
+  voiceRate: 1.05,
 };
+
+function migrateTypes(parsed: Partial<AlertSoundSettings>): AlertTypeToggles {
+  const base = defaultTypeToggles();
+  if (parsed.types && typeof parsed.types === 'object') {
+    for (const t of ALL_ALERT_TYPES) {
+      if (typeof parsed.types[t] === 'boolean') base[t] = parsed.types[t];
+    }
+  }
+  // legado
+  if (typeof parsed.radar === 'boolean') base.radar = parsed.radar;
+  if (typeof parsed.lombada === 'boolean') base.lombada = parsed.lombada;
+  if (typeof parsed.perigo === 'boolean') base.perigo = parsed.perigo;
+  return base;
+}
 
 export function loadAlertSoundSettings(): AlertSoundSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { ...DEFAULT_ALERT_SOUND_SETTINGS };
+    if (!raw) return {
+      ...DEFAULT_ALERT_SOUND_SETTINGS,
+      types: defaultTypeToggles(),
+    };
     const parsed = JSON.parse(raw) as Partial<AlertSoundSettings>;
     return {
       master: parsed.master ?? true,
-      radar: parsed.radar ?? true,
-      lombada: parsed.lombada ?? true,
+      muted: parsed.muted ?? false,
+      types: migrateTypes(parsed),
       voice: parsed.voice ?? true,
       navGuidance: parsed.navGuidance ?? true,
+      personaId: parsed.personaId || 'alessandra',
+      voiceRate:
+        typeof parsed.voiceRate === 'number' && parsed.voiceRate >= 0.7 && parsed.voiceRate <= 1.4
+          ? parsed.voiceRate
+          : 1.05,
     };
   } catch {
-    return { ...DEFAULT_ALERT_SOUND_SETTINGS };
+    return { ...DEFAULT_ALERT_SOUND_SETTINGS, types: defaultTypeToggles() };
   }
 }
 
@@ -43,10 +95,8 @@ export function saveAlertSoundSettings(settings: AlertSoundSettings): void {
 }
 
 export function isAlertSoundEnabled(settings: AlertSoundSettings, type: RoadAlert['type']): boolean {
-  if (!settings.master) return false;
-  if (type === 'radar') return settings.radar;
-  if (type === 'lombada') return settings.lombada;
-  return false;
+  if (settings.muted || !settings.master) return false;
+  return settings.types?.[type as RoadAlertType] ?? true;
 }
 
 let audioCtx: AudioContext | null = null;
@@ -67,6 +117,7 @@ function getAudioContext(): AudioContext | null {
 }
 
 function tone(freq: number, durationSec: number, volume = 0.25): void {
+  if (loadAlertSoundSettings().muted) return;
   const ctx = getAudioContext();
   if (!ctx) return;
   const osc = ctx.createOscillator();
@@ -92,34 +143,66 @@ export function playLombadaAlertSound(): void {
   setTimeout(() => tone(520, 0.18, 0.28), 240);
 }
 
+export function playGenericAlertSound(): void {
+  tone(780, 0.16, 0.28);
+  setTimeout(() => tone(920, 0.2, 0.24), 180);
+}
+
 export function playArrivalSound(): void {
   tone(880, 0.2, 0.28);
   setTimeout(() => tone(1100, 0.28, 0.32), 220);
   setTimeout(() => tone(1320, 0.35, 0.26), 480);
 }
 
-/** Desbloqueia áudio após gesto do usuário (necessário no mobile). */
 export function unlockAlertAudio(): void {
   getAudioContext();
 }
 
-export function speakNavigation(text: string): void {
+export function listAvailableVoices(): VoiceOption[] {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return [];
+  try {
+    const all = window.speechSynthesis.getVoices();
+    const pt = all.filter((v) => /^pt/i.test(v.lang));
+    const pool = pt.length ? pt : all.slice(0, 12);
+    return pool.map((v) => ({
+      uri: v.voiceURI,
+      label: `${v.name} (${v.lang})`,
+      lang: v.lang,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export function speakNavigation(text: string, settingsOverride?: AlertSoundSettings): void {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+  const settings = settingsOverride ?? loadAlertSoundSettings();
+  if (settings.muted) return;
   try {
     window.speechSynthesis.cancel();
+    const persona = getVoicePersona(settings.personaId);
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'pt-BR';
-    utterance.rate = 1.05;
+    utterance.rate = (settings.voiceRate || 1.05) * (persona.rate / 1.05);
+    utterance.pitch = persona.pitch;
     utterance.volume = 0.95;
+    const voice = pickSystemVoiceForPersona(persona);
+    if (voice) utterance.voice = voice;
     window.speechSynthesis.speak(utterance);
   } catch {
     /* ignore */
   }
 }
 
+/** Testa uma persona pelo id. */
+export function testVoicePersona(personaId: string, sample?: string): void {
+  const settings = { ...loadAlertSoundSettings(), muted: false, personaId };
+  const persona = getVoicePersona(personaId);
+  speakNavigation(sample ?? persona.sample, settings);
+}
+
 const ALERT_SOUND_THRESHOLDS_M = [350, 120] as const;
 
-/** Evita repetir o mesmo alerta no mesmo limiar. */
 export type AnnouncedMap = Map<string, Set<number>>;
 
 function isAlertAheadOnRoute(
@@ -141,7 +224,7 @@ export function checkRoadAlertSounds(
   announced: AnnouncedMap,
   routePoints?: Array<{ lat: number; lon: number }>
 ): void {
-  if (!settings.master || !alerts?.length) return;
+  if (settings.muted || !settings.master || !alerts?.length) return;
 
   for (const alert of filterMapAlerts(alerts)) {
     if (!isAlertSoundEnabled(settings, alert.type)) continue;
@@ -159,12 +242,13 @@ export function checkRoadAlertSounds(
       }
       if (buckets.has(threshold)) continue;
       buckets.add(threshold);
-      if (alert.type === 'radar') {
-        playRadarAlertSound();
-        if (threshold <= 120 && settings.voice) speakNavigation('Radar à frente');
-      } else if (alert.type === 'lombada') {
-        playLombadaAlertSound();
-        if (threshold <= 120 && settings.voice) speakNavigation('Lombada à frente');
+
+      if (alert.type === 'radar') playRadarAlertSound();
+      else if (alert.type === 'lombada') playLombadaAlertSound();
+      else playGenericAlertSound();
+
+      if (threshold <= 120 && settings.voice) {
+        speakNavigation(alertTypeSpeak(alert.type), settings);
       }
       break;
     }

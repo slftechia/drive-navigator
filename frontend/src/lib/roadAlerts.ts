@@ -1,13 +1,24 @@
 import type { RoadAlert } from '../api';
 import { distanceToRouteKm, haversineKm, routeProgressKm, snapPointToRoute } from '../utils/geo';
-import { hazardMarkerHtml, lombadaMarkerHtml, radarMarkerHtml } from './mapMarkers';
+import {
+  ALL_ALERT_TYPES,
+  ALERT_TYPE_META,
+  alertTypeIcon as metaIcon,
+  alertTypeLabel as metaLabel,
+  isMapAlertType,
+  type MapAlertType,
+  type RoadAlertType,
+} from './alertTypes';
+import {
+  communityAlertMarkerHtml,
+  hazardMarkerHtml,
+  lombadaMarkerHtml,
+  radarMarkerHtml,
+} from './mapMarkers';
 
-export const MAP_ALERT_TYPES = ['radar', 'lombada', 'perigo'] as const;
-export type MapAlertType = (typeof MAP_ALERT_TYPES)[number];
-
-export function isMapAlertType(type: string): type is MapAlertType {
-  return MAP_ALERT_TYPES.includes(type as MapAlertType);
-}
+export { ALL_ALERT_TYPES, isMapAlertType };
+export type { MapAlertType, RoadAlertType };
+export const MAP_ALERT_TYPES = ALL_ALERT_TYPES;
 
 /** Alertas visíveis no mapa durante navegação/prévia. */
 export function filterMapAlerts(alerts: RoadAlert[] | undefined): RoadAlert[] {
@@ -144,7 +155,32 @@ export function alertMarkerSizePx(zoom: number | null): number {
 export function alertMarkerHtml(type: MapAlertType, zoom: number | null = null): string {
   if (type === 'radar') return radarMarkerHtml(zoom);
   if (type === 'lombada') return lombadaMarkerHtml(zoom);
-  return hazardMarkerHtml(zoom);
+  if (type === 'perigo') return hazardMarkerHtml(zoom);
+  const meta = ALERT_TYPE_META[type];
+  const colors: Partial<Record<MapAlertType, string>> = {
+    policia: 'linear-gradient(180deg,#3b82f6,#1d4ed8)',
+    acidente: 'linear-gradient(180deg,#ef4444,#b91c1c)',
+    congestionamento: 'linear-gradient(180deg,#f59e0b,#d97706)',
+    obra: 'linear-gradient(180deg,#f97316,#c2410c)',
+    via_fechada: 'linear-gradient(180deg,#64748b,#334155)',
+    carro_parado: 'linear-gradient(180deg,#8b5cf6,#6d28d9)',
+    animal: 'linear-gradient(180deg,#84cc16,#4d7c0f)',
+    clima: 'linear-gradient(180deg,#38bdf8,#0284c7)',
+  };
+  return communityAlertMarkerHtml(
+    meta?.icon ?? '⚠️',
+    colors[type] ?? 'linear-gradient(180deg,#fb923c,#ea580c)',
+    zoom,
+    meta?.label ?? 'Alerta'
+  );
+}
+
+export function alertTypeLabel(type: RoadAlert['type']): string {
+  return metaLabel(type);
+}
+
+export function alertTypeIcon(type: RoadAlert['type']): string {
+  return metaIcon(type);
 }
 
 /** Evita pilha de ícones no mesmo trecho (OSM costuma repetir nós próximos). */
@@ -159,13 +195,6 @@ export function dedupeAlertsNearby(alerts: RoadAlert[], minGapKm: number): RoadA
     if (!tooClose) kept.push(alert);
   }
   return kept;
-}
-
-export function alertTypeLabel(type: RoadAlert['type']): string {
-  if (type === 'radar') return 'Radar';
-  if (type === 'lombada') return 'Lombada';
-  if (type === 'perigo') return 'Perigo';
-  return 'Alerta';
 }
 
 /** Próximo alerta à frente na rota (estilo faixa Waze). */
@@ -205,10 +234,4 @@ export function findNextAlertAhead(
     }
   }
   return nearest ? { alert: nearest, distanceMeters: nearestM } : null;
-}
-
-export function alertTypeIcon(type: RoadAlert['type']): string {
-  if (type === 'radar') return '📷';
-  if (type === 'lombada') return '◆';
-  return '⚠️';
 }

@@ -43,13 +43,16 @@ import { useRouteRecalculation } from './hooks/useRouteRecalculation';
 import { useArrivalDetection } from './hooks/useArrivalDetection';
 import { useSpeedLimit } from './hooks/useSpeedLimit';
 import { useNavVoiceGuidance } from './hooks/useNavVoiceGuidance';
+import NavAudioSheet from './components/NavAudioSheet';
 import PlaceDetailSheet, { type PlaceDetail } from './components/PlaceDetailSheet';
 import InstallPrompt from './components/InstallPrompt';
 import LegalConsentModal from './components/LegalConsentModal';
 import LegalDocSheet from './components/LegalDocSheet';
 import ReportSheet from './components/ReportSheet';
 import { useAutoTheme } from './hooks/useAutoTheme';
+import { useCurrentStreet } from './hooks/useCurrentStreet';
 import { loadRecentSearches, type RecentSearch } from './lib/searchHistory';
+import { openMusicApp } from './lib/musicApps';
 import {
   loadSavedPlaces,
   setHomePlace,
@@ -62,6 +65,7 @@ import {
   type SavedPlace,
 } from './lib/savedPlaces';
 import { loadLegalConsent, saveLegalConsent, type LegalDoc } from './lib/legal';
+import { ALERT_TYPE_META } from './lib/alertTypes';
 import { addUserReport, userReportsAsRoadAlerts, type ReportType } from './lib/userReports';
 import { clearDestinationShareParams, parseDestinationFromUrl, shareDestination } from './lib/shareDestination';
 import { liveTrafficFromPace } from './lib/trafficEstimate';
@@ -211,6 +215,7 @@ export default function App() {
   const [placeFavSaved, setPlaceFavSaved] = useState(false);
   const [placeOverlay, setPlaceOverlay] = useState(false);
   const [shareHint, setShareHint] = useState<string | null>(null);
+  const [audioSheetOpen, setAudioSheetOpen] = useState(false);
 
   const gpsActive = gpsState === 'active';
   const gpsLabel =
@@ -518,10 +523,11 @@ export default function App() {
       prev ? { ...prev, roadAlerts: mergeRoadAlerts(prev.roadAlerts, [report]) } : prev
     );
     setReportOpen(false);
-    const msg =
-      type === 'radar' ? 'Radar reportado' : type === 'lombada' ? 'Lombada reportada' : 'Perigo reportado';
+    const msg = `${ALERT_TYPE_META[type].label} reportado — obrigado!`;
     setReportToast(msg);
-    if (alertSounds.navGuidance || alertSounds.voice) speakNavigation(msg);
+    if ((alertSounds.navGuidance || alertSounds.voice) && !alertSounds.muted) {
+      speakNavigation(ALERT_TYPE_META[type].speak, alertSounds);
+    }
     window.setTimeout(() => setReportToast(null), 2200);
 
     void submitCommunityReport({
@@ -567,8 +573,13 @@ export default function App() {
       setScreen('navigating');
       return;
     }
+    // "Sair depois": guarda a rota, mostra no mapa e volta à home com barra "Ir agora".
     setRoutePreviewMinimized(true);
+    setFollowingGps(false);
+    setRouteOverview(true);
+    setRouteOverviewToken((t) => t + 1);
     setPreviewFitToken((t) => t + 1);
+    setScreen('home');
   };
 
   const handleSelectRoute = (id: string) => {
@@ -655,8 +666,10 @@ export default function App() {
   const mapMode: MapMode = useMemo(() => {
     if (screen === 'navigating') return 'navigate';
     if (screen === 'route-preview') return 'preview';
+    // Home com rota salva ("Sair depois"): mantém linha da rota no mapa.
+    if (screen === 'home' && trip) return 'preview';
     return 'idle';
-  }, [screen]);
+  }, [screen, trip]);
 
   const previewAlternatives = useMemo(() => {
     if (trip?.routeAlternatives?.length) return trip.routeAlternatives;
@@ -707,7 +720,7 @@ export default function App() {
   });
 
   useFuelPoisLoader({
-    active: screen === 'navigating' || screen === 'route-preview',
+    active: screen === 'navigating' || screen === 'route-preview' || (screen === 'home' && !!trip),
     position,
     routePoints,
     navigationStartToken,
@@ -771,6 +784,22 @@ export default function App() {
     routePoints
   );
 
+  const instructionStreetFallback = (() => {
+    const msg = nextInstruction?.message?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() ?? '';
+    const m =
+      msg.match(/\bpor\s+(.+)$/i) ||
+      msg.match(/\bem\s+(.+)$/i) ||
+      msg.match(/\bna\s+(.+)$/i);
+    return m?.[1]?.replace(/\.$/, '').trim() || null;
+  })();
+
+  const currentStreet = useCurrentStreet(
+    screen === 'navigating' && !arrived,
+    position.lat,
+    position.lon,
+    instructionStreetFallback
+  );
+
   const nextRoadAlert =
     screen === 'navigating' && trip && !arrived
       ? findNextAlertAhead(trip.roadAlerts, position, routePoints, 500)
@@ -800,7 +829,7 @@ export default function App() {
 
   useNavVoiceGuidance({
     active: screen === 'navigating' && !arrived && !recalculating,
-    enabled: alertSounds.navGuidance,
+    enabled: alertSounds.navGuidance && !alertSounds.muted,
     instruction: nextInstruction,
     userLat: position.lat,
     userLon: position.lon,
@@ -902,9 +931,26 @@ export default function App() {
         )}
 
         {screen === 'home' && trip && (
-          <button type="button" className="home-search-bar home-search-bar-compact" onClick={() => setScreen('route-preview')}>
-            {selectedDest.locationTag ?? selectedDest.label} · {trip.route.totalDistanceKm.toFixed(0)} km
-          </button>
+          <div className="route-later-bar">
+            <button
+              type="button"
+              className="route-later-info"
+              onClick={() => {
+                setRoutePreviewMinimized(false);
+                setRouteOverview(false);
+                setScreen('route-preview');
+                setPreviewFitToken((t) => t + 1);
+              }}
+            >
+                <strong>{selectedDest.locationTag ?? selectedDest.label ?? trip.destination.locationTag}</strong>
+              <span>
+                {trip.route.totalDistanceKm.toFixed(0)} km · toque para ver a rota
+              </span>
+            </button>
+            <button type="button" className="primary route-later-go" onClick={() => handleRouteChoice('navigate')}>
+              Ir agora
+            </button>
+          </div>
         )}
 
         {screen === 'navigating' && trip && (
@@ -920,7 +966,50 @@ export default function App() {
         )}
 
         {screen === 'navigating' && trip && !routeOverview && (
-          <NavSpeedHud speedKmh={speedKmh} limitKmh={speedLimitKmh} fromOsm={speedLimitFromOsm} />
+          <div className="nav-side-fabs">
+            <button
+              type="button"
+              className="nav-side-fab"
+              aria-label="Música"
+              onClick={() => openMusicApp('spotify')}
+            >
+              ♪
+            </button>
+            <button
+              type="button"
+              className={`nav-side-fab${alertSounds.muted ? ' nav-side-fab-muted' : ''}`}
+              aria-label={alertSounds.muted ? 'Ativar som' : 'Silenciar'}
+              onClick={() => {
+                const next = { ...alertSounds, muted: !alertSounds.muted };
+                setAlertSounds(next);
+                saveAlertSoundSettings(next);
+                if (next.muted && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+                  window.speechSynthesis.cancel();
+                }
+              }}
+            >
+              {alertSounds.muted ? '🔇' : '🔊'}
+            </button>
+            <button
+              type="button"
+              className="nav-side-fab"
+              aria-label="Opções de áudio"
+              onClick={() => setAudioSheetOpen(true)}
+            >
+              ⋯
+            </button>
+          </div>
+        )}
+
+        {screen === 'navigating' && trip && !routeOverview && (
+          <div className="nav-street-row">
+            <NavSpeedHud speedKmh={speedKmh} limitKmh={speedLimitKmh} fromOsm={speedLimitFromOsm} />
+            {currentStreet && (
+              <div className="nav-current-street" title={currentStreet}>
+                {currentStreet}
+              </div>
+            )}
+          </div>
         )}
 
         {screen === 'navigating' && trip && !routeOverview && nextRoadAlert && (
@@ -1144,6 +1233,15 @@ export default function App() {
             setConsultOpen(false);
             openPlaceFromPoi(poi);
           }}
+        />
+      )}
+
+      {audioSheetOpen && (
+        <NavAudioSheet
+          settings={alertSounds}
+          onChange={setAlertSounds}
+          onSave={() => saveAlertSoundSettings(alertSounds)}
+          onClose={() => setAudioSheetOpen(false)}
         />
       )}
 

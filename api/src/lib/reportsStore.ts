@@ -1,4 +1,33 @@
-export type CommunityReportType = 'radar' | 'lombada' | 'perigo';
+export type CommunityReportType =
+  | 'radar'
+  | 'lombada'
+  | 'policia'
+  | 'acidente'
+  | 'congestionamento'
+  | 'perigo'
+  | 'obra'
+  | 'via_fechada'
+  | 'carro_parado'
+  | 'animal'
+  | 'clima';
+
+const ALLOWED = new Set<CommunityReportType>([
+  'radar',
+  'lombada',
+  'policia',
+  'acidente',
+  'congestionamento',
+  'perigo',
+  'obra',
+  'via_fechada',
+  'carro_parado',
+  'animal',
+  'clima',
+]);
+
+export function isCommunityReportType(v: string): v is CommunityReportType {
+  return ALLOWED.has(v as CommunityReportType);
+}
 
 export interface CommunityReport {
   id: string;
@@ -7,13 +36,12 @@ export interface CommunityReport {
   lon: number;
   label: string;
   createdAt: number;
-  /** Quantas confirmações (inclui o report inicial). */
   confirms: number;
 }
 
 const TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const MAX_STORE = 2000;
-const DEDUPE_KM = 0.08; // ~80 m
+const DEDUPE_KM = 0.08;
 
 const store: CommunityReport[] = [];
 
@@ -41,9 +69,20 @@ function pruneExpired(): void {
 }
 
 function defaultLabel(type: CommunityReportType): string {
-  if (type === 'radar') return 'Radar (comunidade)';
-  if (type === 'lombada') return 'Lombada (comunidade)';
-  return 'Perigo (comunidade)';
+  const labels: Record<CommunityReportType, string> = {
+    radar: 'Radar (comunidade)',
+    lombada: 'Lombada (comunidade)',
+    policia: 'Polícia (comunidade)',
+    acidente: 'Acidente (comunidade)',
+    congestionamento: 'Congestionamento (comunidade)',
+    perigo: 'Perigo (comunidade)',
+    obra: 'Obra (comunidade)',
+    via_fechada: 'Via fechada (comunidade)',
+    carro_parado: 'Carro parado (comunidade)',
+    animal: 'Animal (comunidade)',
+    clima: 'Clima (comunidade)',
+  };
+  return labels[type];
 }
 
 export function addCommunityReport(input: {
@@ -61,7 +100,7 @@ export function addCommunityReport(input: {
   );
   if (existing) {
     existing.confirms += 1;
-    existing.createdAt = Date.now(); // renova TTL
+    existing.createdAt = Date.now();
     return existing;
   }
 
@@ -101,7 +140,6 @@ export function queryCommunityReportsAlongRoute(
   const out: CommunityReport[] = [];
   for (const r of store) {
     let near = false;
-    // amostrar a cada ~N pontos para não O(n*m) explode
     const step = Math.max(1, Math.floor(points.length / 200));
     for (let i = 0; i < points.length; i += step) {
       if (haversineKm(r.lat, r.lon, points[i].lat, points[i].lon) <= corridorKm) {

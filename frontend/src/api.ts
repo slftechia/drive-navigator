@@ -76,7 +76,18 @@ export interface RouteAlternative {
 
 export interface RoadAlert {
   id: string;
-  type: 'radar' | 'lombada' | 'perigo';
+  type:
+    | 'radar'
+    | 'lombada'
+    | 'policia'
+    | 'acidente'
+    | 'congestionamento'
+    | 'perigo'
+    | 'obra'
+    | 'via_fechada'
+    | 'carro_parado'
+    | 'animal'
+    | 'clima';
   lat: number;
   lon: number;
   label: string;

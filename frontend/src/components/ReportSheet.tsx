@@ -1,3 +1,4 @@
+import { ALERT_TYPE_META, type RoadAlertType } from '../lib/alertTypes';
 import type { ReportType } from '../lib/userReports';
 
 interface ReportSheetProps {
@@ -5,21 +6,19 @@ interface ReportSheetProps {
   onReport: (type: ReportType) => void;
 }
 
-const OPTIONS: Array<{ type: ReportType; icon: string; label: string; hint: string }> = [
-  { type: 'radar', icon: '📷', label: 'Radar', hint: 'Fiscalização à frente' },
-  { type: 'lombada', icon: '◆', label: 'Lombada', hint: 'Redutor de velocidade' },
-  { type: 'perigo', icon: '⚠️', label: 'Perigo', hint: 'Obstáculo / risco na via' },
-];
+const OPTIONS = (Object.values(ALERT_TYPE_META) as Array<(typeof ALERT_TYPE_META)[RoadAlertType]>).filter(
+  (m) => m.reportable
+);
 
-/** Painel rápido estilo Waze para reportar alerta na posição atual. */
+/** Painel estilo Waze para reportar alerta na posição atual (comunidade). */
 export default function ReportSheet({ onClose, onReport }: ReportSheetProps) {
   return (
     <div className="consult-overlay report-overlay" onClick={onClose}>
       <div className="report-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Reportar alerta">
         <div className="consult-handle" />
-        <h2>Reportar na sua posição</h2>
-        <p className="field-hint">O alerta aparece no mapa e é enviado à comunidade quando online.</p>
-        <div className="report-grid">
+        <h2>Alertar outros motoristas</h2>
+        <p className="field-hint">Como no Waze: seu report aparece no mapa e na comunidade.</p>
+        <div className="report-grid report-grid-wide">
           {OPTIONS.map((opt) => (
             <button
               key={opt.type}

@@ -4,7 +4,7 @@ import App from './App';
 import './index.css';
 
 /** Muda a cada release — limpa cache do PWA instalado. */
-const BUILD_ID = '2026-07-15-maps-link-v1';
+const BUILD_ID = '2026-07-15-voices-alerts-v1';
 
 async function ensureFreshBuild() {
   try {

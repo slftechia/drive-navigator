@@ -65,6 +65,7 @@ export default function RoutePreviewSheet({
   const choose = (mode: RouteMode) => {
     if (chosenRef.current) return;
     chosenRef.current = true;
+    setSeconds(-1); // cancela auto-início
     onChoose(mode);
   };
 
@@ -74,11 +75,15 @@ export default function RoutePreviewSheet({
   }, [destination.label, selectedRouteId, countdownSeconds]);
 
   useEffect(() => {
-    if (seconds <= 0) {
+    if (chosenRef.current) return;
+    if (seconds < 0) return;
+    if (seconds === 0) {
       choose('navigate');
       return;
     }
-    const t = setTimeout(() => setSeconds((s) => s - 1), 1000);
+    const t = setTimeout(() => {
+      if (!chosenRef.current) setSeconds((s) => s - 1);
+    }, 1000);
     return () => clearTimeout(t);
   }, [seconds]);
 

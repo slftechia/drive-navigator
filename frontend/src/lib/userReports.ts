@@ -1,10 +1,11 @@
 import type { RoadAlert } from '../api';
+import { ALERT_TYPE_META, defaultAlertLabel, type RoadAlertType } from './alertTypes';
 
 const KEY = 'drive-nav-user-reports-v1';
 const MAX = 80;
-const TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 dias
+const TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
-export type ReportType = RoadAlert['type'];
+export type ReportType = RoadAlertType;
 
 export interface UserReport extends RoadAlert {
   createdAt: number;
@@ -16,7 +17,8 @@ function isReport(v: unknown): v is UserReport {
   const r = v as UserReport;
   return (
     typeof r.id === 'string' &&
-    (r.type === 'radar' || r.type === 'lombada' || r.type === 'perigo') &&
+    typeof r.type === 'string' &&
+    !!ALERT_TYPE_META[r.type as RoadAlertType] &&
     typeof r.lat === 'number' &&
     typeof r.lon === 'number' &&
     Number.isFinite(r.lat) &&
@@ -54,14 +56,12 @@ export function addUserReport(
   lon: number,
   label?: string
 ): UserReport {
-  const defaultLabel =
-    type === 'radar' ? 'Radar (reportado)' : type === 'lombada' ? 'Lombada (reportada)' : 'Perigo (reportado)';
   const report: UserReport = {
     id: `user-${type}-${Date.now()}-${Math.round(lat * 1e5)}-${Math.round(lon * 1e5)}`,
     type,
     lat,
     lon,
-    label: label ?? defaultLabel,
+    label: label ?? defaultAlertLabel(type),
     createdAt: Date.now(),
     source: 'user',
   };

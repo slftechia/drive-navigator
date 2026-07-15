@@ -287,11 +287,22 @@ export default function ConsultSheet({
 
           {tab === 'alerts' && (
             <>
-              <p className="field-hint">Sons ao se aproximar de radares e lombadas na rota (somente em navegação).</p>
+              <p className="field-hint">
+                Preferências de sons e alertas da comunidade. Vozes (Alessandra, João…) e teste: na navegação, botão ⋯.
+              </p>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={!alertSounds.muted}
+                  onChange={(e) => onAlertSoundsChange({ ...alertSounds, muted: !e.target.checked })}
+                />
+                <span>Som ligado</span>
+              </label>
               <label className="toggle-row">
                 <input
                   type="checkbox"
                   checked={alertSounds.master}
+                  disabled={alertSounds.muted}
                   onChange={(e) => onAlertSoundsChange({ ...alertSounds, master: e.target.checked })}
                 />
                 <span>Alertas sonoros ativos</span>
@@ -299,38 +310,43 @@ export default function ConsultSheet({
               <label className="toggle-row">
                 <input
                   type="checkbox"
-                  checked={alertSounds.radar}
-                  disabled={!alertSounds.master}
-                  onChange={(e) => onAlertSoundsChange({ ...alertSounds, radar: e.target.checked })}
-                />
-                <span>📷 Radares</span>
-              </label>
-              <label className="toggle-row">
-                <input
-                  type="checkbox"
-                  checked={alertSounds.lombada}
-                  disabled={!alertSounds.master}
-                  onChange={(e) => onAlertSoundsChange({ ...alertSounds, lombada: e.target.checked })}
-                />
-                <span>⬥ Lombadas</span>
-              </label>
-              <label className="toggle-row">
-                <input
-                  type="checkbox"
                   checked={alertSounds.voice}
-                  disabled={!alertSounds.master}
+                  disabled={alertSounds.muted || !alertSounds.master}
                   onChange={(e) => onAlertSoundsChange({ ...alertSounds, voice: e.target.checked })}
                 />
-                <span>🗣 Aviso por voz nos alertas (120 m)</span>
+                <span>🗣 Aviso por voz nos alertas</span>
               </label>
               <label className="toggle-row">
                 <input
                   type="checkbox"
                   checked={alertSounds.navGuidance}
+                  disabled={alertSounds.muted}
                   onChange={(e) => onAlertSoundsChange({ ...alertSounds, navGuidance: e.target.checked })}
                 />
-                <span>🧭 Voz das manobras (navegação)</span>
+                <span>🧭 Voz das manobras</span>
               </label>
+              <p className="field-hint" style={{ marginTop: '0.75rem' }}>
+                Tipos de alerta (comunidade + OSM):
+              </p>
+              {(['radar', 'lombada', 'policia', 'acidente', 'congestionamento', 'perigo', 'obra', 'via_fechada', 'carro_parado', 'animal', 'clima'] as const).map((t) => (
+                <label key={t} className="toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={alertSounds.types?.[t] ?? true}
+                    disabled={alertSounds.muted || !alertSounds.master}
+                    onChange={(e) =>
+                      onAlertSoundsChange({
+                        ...alertSounds,
+                        types: { ...alertSounds.types, [t]: e.target.checked },
+                      })
+                    }
+                  />
+                  <span>
+                    {t === 'radar' ? '📷' : t === 'lombada' ? '◆' : t === 'policia' ? '🚓' : t === 'acidente' ? '💥' : t === 'congestionamento' ? '🚦' : t === 'perigo' ? '⚠️' : t === 'obra' ? '🚧' : t === 'via_fechada' ? '🚫' : t === 'carro_parado' ? '🚗' : t === 'animal' ? '🐾' : '🌧️'}{' '}
+                    {t === 'radar' ? 'Radar' : t === 'lombada' ? 'Lombada' : t === 'policia' ? 'Polícia' : t === 'acidente' ? 'Acidente' : t === 'congestionamento' ? 'Congestionamento' : t === 'perigo' ? 'Perigo' : t === 'obra' ? 'Obra' : t === 'via_fechada' ? 'Via fechada' : t === 'carro_parado' ? 'Carro parado' : t === 'animal' ? 'Animal' : 'Clima'}
+                  </span>
+                </label>
+              ))}
               <div className="alert-sound-tests">
                 <button
                   type="button"
@@ -338,33 +354,7 @@ export default function ConsultSheet({
                   onClick={() => {
                     void import('../lib/alertSounds').then((m) => {
                       m.unlockAlertAudio();
-                      m.playRadarAlertSound();
-                      if (alertSounds.voice) m.speakNavigation('Radar à frente');
-                    });
-                  }}
-                >
-                  Testar radar
-                </button>
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={() => {
-                    void import('../lib/alertSounds').then((m) => {
-                      m.unlockAlertAudio();
-                      m.playLombadaAlertSound();
-                      if (alertSounds.voice) m.speakNavigation('Lombada à frente');
-                    });
-                  }}
-                >
-                  Testar lombada
-                </button>
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={() => {
-                    void import('../lib/alertSounds').then((m) => {
-                      m.unlockAlertAudio();
-                      if (alertSounds.navGuidance) m.speakNavigation('Em 300 metros, vire à direita');
+                      m.testVoicePersona(alertSounds.personaId || 'alessandra');
                     });
                   }}
                 >
