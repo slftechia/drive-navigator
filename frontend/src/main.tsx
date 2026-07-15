@@ -1,35 +1,51 @@
 import { createRoot } from 'react-dom/client';
+import { registerSW } from 'virtual:pwa-register';
 import App from './App';
 import './index.css';
 
-const SW_PURGE_KEY = 'drive-nav-sw-purged-v45';
+/** Muda a cada release — limpa cache do PWA instalado. */
+const BUILD_ID = '2026-07-15-maps-link-v1';
 
-/** Remove SW/cache antigo que impedia tiles do mapa no celular. */
-async function purgeLegacyServiceWorker(): Promise<void> {
-  const prev = localStorage.getItem(SW_PURGE_KEY);
-  const hadSw = 'serviceWorker' in navigator && (await navigator.serviceWorker.getRegistrations()).length > 0;
-  const hadCaches = 'caches' in window && (await caches.keys()).length > 0;
-
-  if (prev && !hadSw && !hadCaches) return;
-
-  if ('caches' in window) {
-    const keys = await caches.keys();
-    await Promise.all(keys.map((k) => caches.delete(k)));
-  }
-
-  if ('serviceWorker' in navigator) {
-    const regs = await navigator.serviceWorker.getRegistrations();
-    await Promise.all(regs.map((r) => r.unregister()));
-    localStorage.setItem(SW_PURGE_KEY, '1');
-    if (regs.length > 0 || hadCaches) {
-      window.location.reload();
-      return;
+async function ensureFreshBuild() {
+  try {
+    const prev = localStorage.getItem('dn-build');
+    if (prev === BUILD_ID) return false;
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
     }
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    }
+    localStorage.setItem('dn-build', BUILD_ID);
+    if (prev) {
+      window.location.reload();
+      return true;
+    }
+  } catch {
+    localStorage.setItem('dn-build', BUILD_ID);
   }
-
-  localStorage.setItem(SW_PURGE_KEY, '1');
+  return false;
 }
 
-purgeLegacyServiceWorker().finally(() => {
+void (async () => {
+  const reloading = await ensureFreshBuild();
+  if (reloading) return;
+
+  const updateSW = registerSW({
+    immediate: true,
+    onNeedRefresh() {
+      updateSW(true);
+    },
+    onRegisteredSW(_swUrl, registration) {
+      if (!registration) return;
+      void registration.update();
+      window.setInterval(() => {
+        void registration.update();
+      }, 20_000);
+    },
+  });
+
   createRoot(document.getElementById('root')!).render(<App />);
-});
+})();

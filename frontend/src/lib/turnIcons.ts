@@ -1,4 +1,6 @@
-/** Tipos de manobra para ícones estilo Waze (curvas realistas). */
+﻿/**
+ * Ícones de manobra estilo Waze: setas brancas grossas (banner + mapa).
+ */
 export type ManeuverKind =
   | 'turn-left'
   | 'turn-right'
@@ -19,165 +21,47 @@ export type ManeuverKind =
   | 'ferry'
   | 'unknown';
 
-const STROKE = '#ffffff';
-const ACCENT = '#38bdf8';
-
-function arrowHead(
-  x: number,
-  y: number,
-  dir: 'up' | 'left' | 'right' | 'down',
-  size = 9
-): string {
-  const s = size;
-  const base = `stroke="${STROKE}" stroke-width="5.5" fill="none" stroke-linecap="round" stroke-linejoin="round"`;
-  if (dir === 'up') {
-    return `<path d="M${x} ${y} L${x - s} ${y + s} M${x} ${y} L${x + s} ${y + s}" ${base}/>`;
-  }
-  if (dir === 'left') {
-    return `<path d="M${x} ${y} L${x + s} ${y - s} M${x} ${y} L${x + s} ${y + s}" ${base}/>`;
-  }
-  if (dir === 'right') {
-    return `<path d="M${x} ${y} L${x - s} ${y - s} M${x} ${y} L${x - s} ${y + s}" ${base}/>`;
-  }
-  return `<path d="M${x} ${y} L${x - s} ${y - s} M${x} ${y} L${x + s} ${y - s}" ${base}/>`;
-}
+const W = '#ffffff';
 
 const ICON_PATHS: Record<ManeuverKind, string> = {
-  'turn-left': `
-    <path d="M38 58 V34 Q38 16 20 16 H10" stroke="${STROKE}" stroke-width="5.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-    ${arrowHead(10, 16, 'left', 10)}
-  `,
-  'turn-right': `
-    <path d="M34 58 V34 Q34 16 52 16 H62" stroke="${STROKE}" stroke-width="5.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-    ${arrowHead(62, 16, 'right', 10)}
-  `,
-  'sharp-left': `
-    <path d="M40 58 V40 Q40 22 14 14 H8" stroke="${STROKE}" stroke-width="5.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-    ${arrowHead(8, 14, 'left', 11)}
-  `,
-  'sharp-right': `
-    <path d="M32 58 V40 Q32 22 58 14 H64" stroke="${STROKE}" stroke-width="5.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-    ${arrowHead(64, 14, 'right', 11)}
-  `,
-  'slight-left': `
-    <path d="M36 58 V28 L18 14" stroke="${STROKE}" stroke-width="5.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-    ${arrowHead(18, 14, 'left', 9)}
-  `,
-  'slight-right': `
-    <path d="M36 58 V28 L54 14" stroke="${STROKE}" stroke-width="5.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-    ${arrowHead(54, 14, 'right', 9)}
-  `,
-  straight: `
-    <path d="M36 58 V18" stroke="${STROKE}" stroke-width="5.5" fill="none" stroke-linecap="round"/>
-    ${arrowHead(36, 18, 'up', 11)}
-  `,
-  uturn: `
-    <path d="M48 58 V42 Q48 18 28 18 Q8 18 8 38 Q8 52 22 52" stroke="${STROKE}" stroke-width="5.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-    ${arrowHead(22, 52, 'left', 10)}
-  `,
-  roundabout: `
-    <circle cx="36" cy="34" r="16" stroke="${STROKE}" stroke-width="4.5" fill="none"/>
-    <path d="M36 58 V50" stroke="${STROKE}" stroke-width="5" fill="none" stroke-linecap="round"/>
-    <path d="M52 34 H60" stroke="${ACCENT}" stroke-width="5" fill="none" stroke-linecap="round"/>
-    ${arrowHead(60, 34, 'right', 9)}
-  `,
-  'roundabout-left': `
-    <circle cx="38" cy="34" r="15" stroke="${STROKE}" stroke-width="4.5" fill="none"/>
-    <path d="M38 58 V49" stroke="${STROKE}" stroke-width="5" fill="none" stroke-linecap="round"/>
-    <path d="M23 34 H12" stroke="${ACCENT}" stroke-width="5" fill="none" stroke-linecap="round"/>
-    ${arrowHead(12, 34, 'left', 9)}
-  `,
-  'roundabout-right': `
-    <circle cx="34" cy="34" r="15" stroke="${STROKE}" stroke-width="4.5" fill="none"/>
-    <path d="M34 58 V49" stroke="${STROKE}" stroke-width="5" fill="none" stroke-linecap="round"/>
-    <path d="M49 34 H60" stroke="${ACCENT}" stroke-width="5" fill="none" stroke-linecap="round"/>
-    ${arrowHead(60, 34, 'right', 9)}
-  `,
-  'exit-left': `
-    <path d="M36 58 V30 Q36 18 22 18 H12" stroke="${STROKE}" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-    ${arrowHead(12, 18, 'left', 9)}
-    <path d="M36 58 V42" stroke="${ACCENT}" stroke-width="4" fill="none" stroke-linecap="round" opacity="0.7"/>
-  `,
-  'exit-right': `
-    <path d="M36 58 V30 Q36 18 50 18 H60" stroke="${STROKE}" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-    ${arrowHead(60, 18, 'right', 9)}
-    <path d="M36 58 V42" stroke="${ACCENT}" stroke-width="4" fill="none" stroke-linecap="round" opacity="0.7"/>
-  `,
-  merge: `
-    <path d="M22 58 V32 L36 18" stroke="${STROKE}" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M50 58 V32 L36 18" stroke="${STROKE}" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-    ${arrowHead(36, 18, 'up', 10)}
-  `,
-  arrive: `
-    <circle cx="36" cy="28" r="10" stroke="${ACCENT}" stroke-width="4" fill="none"/>
-    <path d="M36 38 V56" stroke="${STROKE}" stroke-width="5" fill="none" stroke-linecap="round"/>
-    <path d="M28 56 H44" stroke="${STROKE}" stroke-width="5" fill="none" stroke-linecap="round"/>
-  `,
-  depart: `
-    <circle cx="36" cy="50" r="7" fill="${ACCENT}"/>
-    <path d="M36 43 V16" stroke="${STROKE}" stroke-width="5" fill="none" stroke-linecap="round"/>
-    ${arrowHead(36, 16, 'up', 10)}
-  `,
-  ferry: `
-    <path d="M14 46 H58 L52 34 H20 Z" stroke="${STROKE}" stroke-width="4" fill="none" stroke-linejoin="round"/>
-    <path d="M36 34 V18" stroke="${STROKE}" stroke-width="4" fill="none" stroke-linecap="round"/>
-    ${arrowHead(36, 18, 'up', 8)}
-  `,
-  unknown: `
-    <path d="M36 58 V18" stroke="${STROKE}" stroke-width="5.5" fill="none" stroke-linecap="round"/>
-    ${arrowHead(36, 18, 'up', 11)}
-  `,
+  'turn-right': `<path fill="${W}" d="M26 64 L26 34 C26 22 34 16 46 16 L52 16 L52 6 L70 24 L52 42 L52 30 L48 30 C38 30 36 34 36 40 L36 64 Z"/>`,
+  'turn-left': `<path fill="${W}" d="M46 64 L46 34 C46 22 38 16 26 16 L20 16 L20 6 L2 24 L20 42 L20 30 L24 30 C34 30 36 34 36 40 L36 64 Z"/>`,
+  'sharp-right': `<path fill="${W}" d="M26 64 L26 38 C26 26 34 18 50 12 L54 10 L54 2 L70 22 L52 38 L52 26 C40 30 36 36 36 44 L36 64 Z"/>`,
+  'sharp-left': `<path fill="${W}" d="M46 64 L46 38 C46 26 38 18 22 12 L18 10 L18 2 L2 22 L20 38 L20 26 C32 30 36 36 36 44 L36 64 Z"/>`,
+  'slight-right': `<path fill="${W}" d="M28 64 L28 34 L44 14 L52 8 L48 0 L68 14 L54 34 L48 28 L38 40 L38 64 Z"/>`,
+  'slight-left': `<path fill="${W}" d="M44 64 L44 34 L28 14 L20 8 L24 0 L4 14 L18 34 L24 28 L34 40 L34 64 Z"/>`,
+  straight: `<path fill="${W}" d="M28 64 L28 28 L14 28 L36 4 L58 28 L44 28 L44 64 Z"/>`,
+  uturn: `<path fill="${W}" d="M48 64 L48 34 C48 16 36 8 24 8 C12 8 2 16 2 32 C2 46 12 52 22 52 L22 38 C16 38 14 34 14 30 C14 24 18 18 24 18 C30 18 36 24 36 32 L36 64 Z"/>`,
+  roundabout: `<circle cx="36" cy="30" r="15" fill="none" stroke="${W}" stroke-width="8"/><path fill="${W}" d="M30 64 L30 48 L42 48 L42 64 Z"/><path fill="${W}" d="M48 24 L60 30 L48 36 Z"/>`,
+  'roundabout-left': `<circle cx="38" cy="30" r="14" fill="none" stroke="${W}" stroke-width="8"/><path fill="${W}" d="M32 64 L32 48 L44 48 L44 64 Z"/><path fill="${W}" d="M28 24 L12 30 L28 36 Z"/>`,
+  'roundabout-right': `<circle cx="34" cy="30" r="14" fill="none" stroke="${W}" stroke-width="8"/><path fill="${W}" d="M28 64 L28 48 L40 48 L40 64 Z"/><path fill="${W}" d="M44 24 L60 30 L44 36 Z"/>`,
+  'exit-right': `<path fill="${W}" d="M26 64 L26 34 C26 22 34 16 46 16 L52 16 L52 6 L70 24 L52 42 L52 30 L48 30 C38 30 36 34 36 40 L36 64 Z"/>`,
+  'exit-left': `<path fill="${W}" d="M46 64 L46 34 C46 22 38 16 26 16 L20 16 L20 6 L2 24 L20 42 L20 30 L24 30 C34 30 36 34 36 40 L36 64 Z"/>`,
+  merge: `<path fill="${W}" d="M16 64 L16 38 L30 18 L36 10 L28 10 L36 0 L54 22 L46 22 L36 36 L36 64 Z"/>`,
+  arrive: `<circle cx="36" cy="24" r="13" fill="none" stroke="${W}" stroke-width="7"/><path fill="${W}" d="M30 40 L30 64 L42 64 L42 40 Z"/>`,
+  depart: `<circle cx="36" cy="52" r="9" fill="${W}"/><path fill="${W}" d="M28 40 L28 24 L14 24 L36 2 L58 24 L44 24 L44 40 Z"/>`,
+  ferry: `<path fill="${W}" d="M12 50 L60 50 L52 34 L20 34 Z"/><path fill="${W}" d="M28 34 L28 18 L14 18 L36 2 L58 18 L44 18 L44 34 Z"/>`,
+  unknown: `<path fill="${W}" d="M28 64 L28 28 L14 28 L36 4 L58 28 L44 28 L44 64 Z"/>`,
 };
 
 export function parseManeuverKind(instructionType?: string, message?: string): ManeuverKind {
   const type = (instructionType ?? '').toUpperCase().replace(/-/g, '_').replace(/\s+/g, '_');
   const msg = (message ?? '').toLowerCase();
-
   const fromType: Record<string, ManeuverKind> = {
-    TURN_LEFT: 'turn-left',
-    TURN_SHARP_LEFT: 'sharp-left',
-    TURN_SLIGHT_LEFT: 'slight-left',
-    SHARP_LEFT: 'sharp-left',
-    SLIGHT_LEFT: 'slight-left',
-    BEAR_LEFT: 'slight-left',
-    KEEP_LEFT: 'slight-left',
-    WAYPOINT_LEFT: 'slight-left',
-    ARRIVE_LEFT: 'arrive',
-    TURN_RIGHT: 'turn-right',
-    TURN_SHARP_RIGHT: 'sharp-right',
-    TURN_SLIGHT_RIGHT: 'slight-right',
-    SHARP_RIGHT: 'sharp-right',
-    SLIGHT_RIGHT: 'slight-right',
-    BEAR_RIGHT: 'slight-right',
-    KEEP_RIGHT: 'slight-right',
-    WAYPOINT_RIGHT: 'slight-right',
-    ARRIVE_RIGHT: 'arrive',
-    TURN: 'straight',
-    STRAIGHT: 'straight',
-    FOLLOW: 'straight',
-    DEPART: 'depart',
-    ARRIVE: 'arrive',
-    WAYPOINT_REACHED: 'arrive',
-    MAKE_UTURN: 'uturn',
-    TRY_MAKE_UTURN: 'uturn',
-    ROUNDABOUT_LEFT: 'roundabout-left',
-    ROUNDABOUT_RIGHT: 'roundabout-right',
-    ROUNDABOUT_CROSS: 'roundabout',
-    ROUNDABOUT_BACK: 'uturn',
-    MOTORWAY_EXIT_LEFT: 'exit-left',
-    TAKE_EXIT: 'exit-right',
-    MOTORWAY_EXIT_RIGHT: 'exit-right',
-    ENTRANCE_RAMP: 'merge',
-    ENTER_MOTORWAY: 'merge',
-    ENTER_FREEWAY: 'merge',
-    ENTER_HIGHWAY: 'merge',
-    SWITCH_PARALLEL_ROAD: 'merge',
-    SWITCH_MAIN_ROAD: 'merge',
-    TAKE_FERRY: 'ferry',
+    TURN_LEFT: 'turn-left', TURN_SHARP_LEFT: 'sharp-left', TURN_SLIGHT_LEFT: 'slight-left',
+    SHARP_LEFT: 'sharp-left', SLIGHT_LEFT: 'slight-left', BEAR_LEFT: 'slight-left', KEEP_LEFT: 'slight-left',
+    WAYPOINT_LEFT: 'slight-left', ARRIVE_LEFT: 'arrive', TURN_RIGHT: 'turn-right',
+    TURN_SHARP_RIGHT: 'sharp-right', TURN_SLIGHT_RIGHT: 'slight-right', SHARP_RIGHT: 'sharp-right',
+    SLIGHT_RIGHT: 'slight-right', BEAR_RIGHT: 'slight-right', KEEP_RIGHT: 'slight-right',
+    WAYPOINT_RIGHT: 'slight-right', ARRIVE_RIGHT: 'arrive', TURN: 'straight', STRAIGHT: 'straight',
+    FOLLOW: 'straight', DEPART: 'depart', ARRIVE: 'arrive', WAYPOINT_REACHED: 'arrive',
+    MAKE_UTURN: 'uturn', TRY_MAKE_UTURN: 'uturn', ROUNDABOUT_LEFT: 'roundabout-left',
+    ROUNDABOUT_RIGHT: 'roundabout-right', ROUNDABOUT_CROSS: 'roundabout', ROUNDABOUT_BACK: 'uturn',
+    MOTORWAY_EXIT_LEFT: 'exit-left', TAKE_EXIT: 'exit-right', MOTORWAY_EXIT_RIGHT: 'exit-right',
+    ENTRANCE_RAMP: 'merge', ENTER_MOTORWAY: 'merge', ENTER_FREEWAY: 'merge', ENTER_HIGHWAY: 'merge',
+    SWITCH_PARALLEL_ROAD: 'merge', SWITCH_MAIN_ROAD: 'merge', TAKE_FERRY: 'ferry',
   };
-
   if (type && fromType[type]) return fromType[type];
-
   if (/rotat|retorn|roundabout/.test(msg)) {
     if (/esquerda|à esquerda/.test(msg)) return 'roundabout-left';
     if (/direita|à direita/.test(msg)) return 'roundabout-right';
@@ -195,7 +79,6 @@ export function parseManeuverKind(instructionType?: string, message?: string): M
   if (/cheg|destino|você chegou/.test(msg)) return 'arrive';
   if (/embarque|balsa|ferry/.test(msg)) return 'ferry';
   if (/siga em frente|continue em frente|reto|segue/.test(msg)) return 'straight';
-
   if (/esquerda/.test(msg)) return 'turn-left';
   if (/direita/.test(msg)) return 'turn-right';
   return 'straight';
@@ -203,24 +86,13 @@ export function parseManeuverKind(instructionType?: string, message?: string): M
 
 export function maneuverLabel(kind: ManeuverKind): string {
   const labels: Record<ManeuverKind, string> = {
-    'turn-left': 'Vire à esquerda',
-    'turn-right': 'Vire à direita',
-    'sharp-left': 'Curva fechada à esquerda',
-    'sharp-right': 'Curva fechada à direita',
-    'slight-left': 'Mantenha à esquerda',
-    'slight-right': 'Mantenha à direita',
-    straight: 'Siga em frente',
-    uturn: 'Retorno',
-    roundabout: 'Rotatória',
-    'roundabout-left': 'Rotatória — saída à esquerda',
-    'roundabout-right': 'Rotatória — saída à direita',
-    'exit-left': 'Saída à esquerda',
-    'exit-right': 'Saída à direita',
-    merge: 'Entre na via',
-    arrive: 'Chegada',
-    depart: 'Início',
-    ferry: 'Balsa',
-    unknown: 'Continue',
+    'turn-left': 'Vire à esquerda', 'turn-right': 'Vire à direita',
+    'sharp-left': 'Curva fechada à esquerda', 'sharp-right': 'Curva fechada à direita',
+    'slight-left': 'Mantenha à esquerda', 'slight-right': 'Mantenha à direita',
+    straight: 'Siga em frente', uturn: 'Retorno', roundabout: 'Rotatória',
+    'roundabout-left': 'Rotatória — saída à esquerda', 'roundabout-right': 'Rotatória — saída à direita',
+    'exit-left': 'Saída à esquerda', 'exit-right': 'Saída à direita', merge: 'Entre na via',
+    arrive: 'Chegada', depart: 'Início', ferry: 'Balsa', unknown: 'Continue',
   };
   return labels[kind];
 }
@@ -230,17 +102,30 @@ export function turnIconSvg(kind: ManeuverKind, px = 72): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 72 72" aria-hidden="true">${paths}</svg>`;
 }
 
-/** Ícone grande no banner superior (HUD). */
 export function turnBannerHtml(instructionType?: string, message?: string): string {
   const kind = parseManeuverKind(instructionType, message);
-  return `<div class="wz-turn-banner" aria-hidden="true">${turnIconSvg(kind, 76)}</div>`;
+  return `<div class="wz-turn-banner" aria-hidden="true" style="filter:drop-shadow(0 2px 4px rgba(0,0,0,.45))">${turnIconSvg(kind, 78)}</div>`;
 }
 
-/** Ícone grande no mapa, na manobra seguinte. */
+export function turnThenHtml(instructionType?: string, message?: string): string {
+  const kind = parseManeuverKind(instructionType, message);
+  return `<div class="wz-turn-then" aria-hidden="true">${turnIconSvg(kind, 24)}</div>`;
+}
+
+const ROUTE_TURN_PATHS: Partial<Record<ManeuverKind, string>> = {
+  'turn-right': `<path fill="#fff" stroke="#0f172a" stroke-width="3" stroke-linejoin="round" d="M28 64 L28 30 C28 20 34 16 44 16 L50 16 L50 8 L68 24 L50 40 L50 28 L46 28 C38 28 36 32 36 38 L36 64 Z"/>`,
+  'turn-left': `<path fill="#fff" stroke="#0f172a" stroke-width="3" stroke-linejoin="round" d="M44 64 L44 30 C44 20 38 16 28 16 L22 16 L22 8 L4 24 L22 40 L22 28 L26 28 C34 28 36 32 36 38 L36 64 Z"/>`,
+  'sharp-right': `<path fill="#fff" stroke="#0f172a" stroke-width="3" stroke-linejoin="round" d="M28 64 L28 36 C28 24 36 16 50 10 L54 8 L54 2 L68 22 L52 38 L52 26 C40 30 36 36 36 44 L36 64 Z"/>`,
+  'sharp-left': `<path fill="#fff" stroke="#0f172a" stroke-width="3" stroke-linejoin="round" d="M44 64 L44 36 C44 24 36 16 22 10 L18 8 L18 2 L4 22 L20 38 L20 26 C32 30 36 36 36 44 L36 64 Z"/>`,
+  'slight-right': `<path fill="#fff" stroke="#0f172a" stroke-width="3" stroke-linejoin="round" d="M30 64 L30 34 L44 14 L52 8 L48 0 L68 14 L54 34 L48 28 L38 40 L38 64 Z"/>`,
+  'slight-left': `<path fill="#fff" stroke="#0f172a" stroke-width="3" stroke-linejoin="round" d="M42 64 L42 34 L28 14 L20 8 L24 0 L4 14 L18 34 L24 28 L34 40 L34 64 Z"/>`,
+  straight: `<path fill="#fff" stroke="#0f172a" stroke-width="3" stroke-linejoin="round" d="M28 64 L28 28 L16 28 L36 6 L56 28 L44 28 L44 64 Z"/>`,
+  uturn: `<path fill="#fff" stroke="#0f172a" stroke-width="3" stroke-linejoin="round" d="M46 64 L46 34 C46 16 34 8 22 8 C10 8 2 16 2 30 C2 44 10 50 20 50 L20 38 C14 38 12 34 12 30 C12 24 16 18 22 18 C28 18 34 24 34 32 L34 64 Z"/>`,
+};
+
+/** Seta Waze SOBRE a rota: branca + contorno escuro, SEM círculo. */
 export function turnMapMarkerHtml(instructionType?: string, message?: string): string {
   const kind = parseManeuverKind(instructionType, message);
-  return `<div class="wz-turn-map" aria-hidden="true">
-    <div class="wz-turn-map-bg"></div>
-    ${turnIconSvg(kind, 56)}
-  </div>`;
+  const body = ROUTE_TURN_PATHS[kind] ?? ROUTE_TURN_PATHS['turn-right'];
+  return `<div aria-hidden="true" style="width:80px;height:80px;pointer-events:none;line-height:0"><svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 72 72" style="display:block;filter:drop-shadow(0 2px 3px rgba(0,0,0,.55))">${body}</svg></div>`;
 }

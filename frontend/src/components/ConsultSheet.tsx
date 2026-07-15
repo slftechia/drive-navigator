@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import DestinationInput, { type SelectedDestination } from './DestinationInput';
 import type { TripPlan, VehicleConfig, FuelAlert } from '../api';
 import { alertTypeIcon, alertTypeLabel } from '../lib/roadAlerts';
 import type { AlertSoundSettings } from '../lib/alertSounds';
+import type { SavedPlace } from '../lib/savedPlaces';
 
-export type ConsultTab = 'route' | 'vehicle' | 'pois' | 'stops' | 'alerts';
+export type ConsultTab = 'route' | 'vehicle' | 'pois' | 'stops' | 'alerts' | 'saved';
 
 interface ConsultSheetProps {
   tab: ConsultTab;
@@ -31,6 +33,21 @@ interface ConsultSheetProps {
   alertSounds: AlertSoundSettings;
   onAlertSoundsChange: (s: AlertSoundSettings) => void;
   onSaveAlertSounds: () => void;
+  homePlace: SavedPlace | null;
+  workPlace: SavedPlace | null;
+  favorites: SavedPlace[];
+  onSetHome: (d: SelectedDestination) => void;
+  onSetWork: (d: SelectedDestination) => void;
+  onClearHome: () => void;
+  onClearWork: () => void;
+  onAddFavorite: (d: SelectedDestination) => void;
+  onRemoveFavorite: (id: string) => void;
+  onGoToSaved: (place: SavedPlace) => void;
+  onUseGpsAsHome: () => void;
+  onUseGpsAsWork: () => void;
+  onOpenTerms: () => void;
+  onOpenPrivacy: () => void;
+  onSelectPoi?: (poi: { name: string; lat: number; lon: number; address?: string; category?: string }) => void;
 }
 
 const POI_ICONS: Record<string, string> = { fuel: '⛽', food: '🍽️', hotel: '🏨' };
@@ -66,7 +83,35 @@ export default function ConsultSheet({
   alertSounds,
   onAlertSoundsChange,
   onSaveAlertSounds,
+  homePlace,
+  workPlace,
+  favorites,
+  onSetHome,
+  onSetWork,
+  onClearHome,
+  onClearWork,
+  onAddFavorite,
+  onRemoveFavorite,
+  onGoToSaved,
+  onUseGpsAsHome,
+  onUseGpsAsWork,
+  onOpenTerms,
+  onOpenPrivacy,
+  onSelectPoi,
 }: ConsultSheetProps) {
+  const [homeQuery, setHomeQuery] = useState('');
+  const [workQuery, setWorkQuery] = useState('');
+  const [favQuery, setFavQuery] = useState('');
+
+  const tabLabel = (t: ConsultTab): string => {
+    if (t === 'route') return 'Rota';
+    if (t === 'alerts') return 'Alertas';
+    if (t === 'vehicle') return 'Veículo';
+    if (t === 'pois') return 'Locais';
+    if (t === 'saved') return 'Salvos';
+    return 'Descanso';
+  };
+
   return (
     <div className="consult-overlay" onClick={onClose}>
       <div className="consult-sheet" onClick={(e) => e.stopPropagation()}>
@@ -77,22 +122,14 @@ export default function ConsultSheet({
         </div>
 
         <div className="consult-tabs">
-          {(['route', 'alerts', 'pois', 'stops', 'vehicle'] as ConsultTab[]).map((t) => (
+          {(['route', 'alerts', 'saved', 'pois', 'stops', 'vehicle'] as ConsultTab[]).map((t) => (
             <button
               key={t}
               type="button"
               className={tab === t ? 'active' : ''}
               onClick={() => onTabChange(t)}
             >
-              {t === 'route'
-                ? 'Rota'
-                : t === 'alerts'
-                  ? 'Alertas'
-                  : t === 'vehicle'
-                    ? 'Veículo'
-                    : t === 'pois'
-                      ? 'Locais'
-                      : 'Descanso'}
+              {tabLabel(t)}
             </button>
           ))}
         </div>
@@ -206,11 +243,27 @@ export default function ConsultSheet({
                     <ul className="poi-list">
                       {items.map((poi) => (
                         <li key={poi.id} className="poi-item">
-                          <span className={`poi-icon ${poi.category}`}>{POI_ICONS[poi.category]}</span>
-                          <div>
-                            <div>{poi.name}</div>
-                            {poi.address && <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>{poi.address}</div>}
-                          </div>
+                          <button
+                            type="button"
+                            className="poi-item-btn"
+                            onClick={() => {
+                              onSelectPoi?.({
+                                name: poi.name,
+                                lat: poi.lat,
+                                lon: poi.lon,
+                                address: poi.address,
+                                category: poi.category,
+                              });
+                            }}
+                          >
+                            <span className={`poi-icon ${poi.category}`}>{POI_ICONS[poi.category]}</span>
+                            <div>
+                              <div>{poi.name}</div>
+                              {poi.address && (
+                                <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>{poi.address}</div>
+                              )}
+                            </div>
+                          </button>
                         </li>
                       ))}
                     </ul>
@@ -268,7 +321,15 @@ export default function ConsultSheet({
                   disabled={!alertSounds.master}
                   onChange={(e) => onAlertSoundsChange({ ...alertSounds, voice: e.target.checked })}
                 />
-                <span>🗣 Aviso por voz (120 m)</span>
+                <span>🗣 Aviso por voz nos alertas (120 m)</span>
+              </label>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={alertSounds.navGuidance}
+                  onChange={(e) => onAlertSoundsChange({ ...alertSounds, navGuidance: e.target.checked })}
+                />
+                <span>🧭 Voz das manobras (navegação)</span>
               </label>
               <div className="alert-sound-tests">
                 <button
@@ -297,10 +358,144 @@ export default function ConsultSheet({
                 >
                   Testar lombada
                 </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => {
+                    void import('../lib/alertSounds').then((m) => {
+                      m.unlockAlertAudio();
+                      if (alertSounds.navGuidance) m.speakNavigation('Em 300 metros, vire à direita');
+                    });
+                  }}
+                >
+                  Testar voz
+                </button>
               </div>
               <button type="button" className="primary" style={{ width: '100%', marginTop: '0.75rem' }} onClick={onSaveAlertSounds}>
                 Salvar preferências
               </button>
+            </>
+          )}
+
+          {tab === 'saved' && (
+            <>
+              <p className="field-hint">Casa, trabalho e favoritos ficam neste aparelho.</p>
+
+              <div className="saved-slot">
+                <div className="saved-slot-head">
+                  <strong>🏠 Casa</strong>
+                  {homePlace && (
+                    <button type="button" className="ghost saved-slot-clear" onClick={onClearHome}>
+                      Remover
+                    </button>
+                  )}
+                </div>
+                {homePlace ? (
+                  <button type="button" className="saved-place-row" onClick={() => onGoToSaved(homePlace)}>
+                    <span>
+                      <em>{homePlace.placeName || homePlace.label}</em>
+                      <small>{homePlace.locationTag || homePlace.city || homePlace.label}</small>
+                    </span>
+                    <span className="saved-go">Ir</span>
+                  </button>
+                ) : (
+                  <>
+                    <DestinationInput
+                      value={homeQuery}
+                      onChange={setHomeQuery}
+                      onPick={(d) => {
+                        onSetHome(d);
+                        setHomeQuery('');
+                      }}
+                      userLat={userLat}
+                      userLon={userLon}
+                      placeholder="Buscar endereço de casa…"
+                    />
+                    <button type="button" className="ghost" style={{ marginTop: '0.4rem' }} onClick={onUseGpsAsHome} disabled={!gpsActive}>
+                      Usar posição atual
+                    </button>
+                  </>
+                )}
+              </div>
+
+              <div className="saved-slot">
+                <div className="saved-slot-head">
+                  <strong>💼 Trabalho</strong>
+                  {workPlace && (
+                    <button type="button" className="ghost saved-slot-clear" onClick={onClearWork}>
+                      Remover
+                    </button>
+                  )}
+                </div>
+                {workPlace ? (
+                  <button type="button" className="saved-place-row" onClick={() => onGoToSaved(workPlace)}>
+                    <span>
+                      <em>{workPlace.placeName || workPlace.label}</em>
+                      <small>{workPlace.locationTag || workPlace.city || workPlace.label}</small>
+                    </span>
+                    <span className="saved-go">Ir</span>
+                  </button>
+                ) : (
+                  <>
+                    <DestinationInput
+                      value={workQuery}
+                      onChange={setWorkQuery}
+                      onPick={(d) => {
+                        onSetWork(d);
+                        setWorkQuery('');
+                      }}
+                      userLat={userLat}
+                      userLon={userLon}
+                      placeholder="Buscar endereço do trabalho…"
+                    />
+                    <button type="button" className="ghost" style={{ marginTop: '0.4rem' }} onClick={onUseGpsAsWork} disabled={!gpsActive}>
+                      Usar posição atual
+                    </button>
+                  </>
+                )}
+              </div>
+
+              <div className="saved-slot">
+                <div className="saved-slot-head">
+                  <strong>📍 Favoritos</strong>
+                </div>
+                <DestinationInput
+                  value={favQuery}
+                  onChange={setFavQuery}
+                  onPick={(d) => {
+                    onAddFavorite(d);
+                    setFavQuery('');
+                  }}
+                  userLat={userLat}
+                  userLon={userLon}
+                  placeholder="Adicionar favorito…"
+                />
+                {favorites.length === 0 ? (
+                  <p className="field-hint" style={{ marginTop: '0.6rem' }}>Nenhum favorito ainda.</p>
+                ) : (
+                  <ul className="saved-fav-list">
+                    {favorites.map((f) => (
+                      <li key={f.id}>
+                        <button type="button" className="saved-place-row" onClick={() => onGoToSaved(f)}>
+                          <span>
+                            <em>{f.placeName || f.label}</em>
+                            <small>{f.locationTag || f.city || f.label}</small>
+                          </span>
+                          <span className="saved-go">Ir</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn saved-fav-remove"
+                          aria-label="Remover favorito"
+                          onClick={() => onRemoveFavorite(f.id)}
+                        >
+                          ×
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </>
           )}
 
@@ -323,6 +518,15 @@ export default function ConsultSheet({
               <button type="button" className="primary" style={{ width: '100%' }} onClick={onSaveVehicle}>
                 Salvar
               </button>
+              <div className="legal-footer">
+                <button type="button" className="legal-link" onClick={onOpenTerms}>
+                  Termos de Uso
+                </button>
+                <span aria-hidden>·</span>
+                <button type="button" className="legal-link" onClick={onOpenPrivacy}>
+                  Privacidade
+                </button>
+              </div>
             </>
           )}
         </div>

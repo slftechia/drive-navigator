@@ -125,13 +125,13 @@ function parseOsrmRoute(route: OsrmRoute) {
   };
 }
 
-async function fetchOsrmRoute(
+async function fetchOsrmRoutes(
   originLat: number,
   originLon: number,
   destLat: number,
   destLon: number,
   waypoints: Array<{ lat: number; lon: number }> = []
-): Promise<OsrmRoute> {
+): Promise<OsrmRoute[]> {
   const parts = [
     `${originLon},${originLat}`,
     ...waypoints.map((w) => `${w.lon},${w.lat}`),
@@ -141,17 +141,32 @@ async function fetchOsrmRoute(
   url.searchParams.set('overview', 'full');
   url.searchParams.set('geometries', 'polyline');
   url.searchParams.set('steps', 'true');
-  url.searchParams.set('alternatives', 'false');
+  url.searchParams.set('alternatives', 'true');
+  url.searchParams.set('continue_straight', 'true');
 
-  const res = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
-  if (!res.ok) {
-    throw new Error(`Rota OSRM falhou (${res.status})`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 14_000);
+  try {
+    const res = await fetch(url.toString(), {
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      throw new Error(`Rota OSRM falhou (${res.status})`);
+    }
+    const data = (await res.json()) as { routes?: OsrmRoute[]; code?: string; message?: string };
+    if (data.code !== 'Ok' || !data.routes?.[0]) {
+      throw new Error(data.message ?? 'Nenhuma rota encontrada');
+    }
+    return data.routes.slice(0, 3);
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('Cálculo da rota demorou demais. Tente novamente.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
-  const data = (await res.json()) as { routes?: OsrmRoute[]; code?: string; message?: string };
-  if (data.code !== 'Ok' || !data.routes?.[0]) {
-    throw new Error(data.message ?? 'Nenhuma rota encontrada');
-  }
-  return data.routes[0];
 }
 
 function computeFuelAlert(remainingFuelKm: number, reserveKm: number) {
@@ -201,23 +216,30 @@ export async function planTripDirect(params: {
   }
 
   const waypoints = (params.waypoints ?? []).filter((w) => w.lat && w.lon);
-  const osrmRoute = await fetchOsrmRoute(
+  const osrmRoutes = await fetchOsrmRoutes(
     params.originLat,
     params.originLon,
     destLat,
     destLon,
     waypoints
   );
-  const route = parseOsrmRoute(osrmRoute);
-
-  const alternative: RouteAlternative = {
-    id: 'direct',
-    kind: 'with_tolls',
-    label: 'Rota sugerida',
+  const parsed = osrmRoutes.map((r) => parseOsrmRoute(r));
+  const alternatives: RouteAlternative[] = parsed.map((route, i) => ({
+    id: i === 0 ? 'direct' : `alt_${i}`,
+    kind: 'with_tolls' as const,
+    label: i === 0 ? 'Rota sugerida' : `Alternativa ${i}`,
     hasTolls: false,
     tollCount: 0,
     tollCostEstimateBrl: null,
     ...route,
+  }));
+  alternatives.sort((a, b) => a.totalDurationMinutes - b.totalDurationMinutes);
+  const selected = alternatives[0];
+  const route = {
+    legs: selected.legs,
+    totalDistanceKm: selected.totalDistanceKm,
+    totalDurationMinutes: selected.totalDurationMinutes,
+    instructions: selected.instructions,
   };
 
   return {
@@ -230,8 +252,8 @@ export async function planTripDirect(params: {
     },
     waypoints,
     route,
-    routeAlternatives: [alternative],
-    selectedRouteId: 'direct',
+    routeAlternatives: alternatives,
+    selectedRouteId: selected.id,
     pois: [],
     roadAlerts: [],
     fuelAlert: computeFuelAlert(params.currentFuelKm, params.fuelReserveKm),

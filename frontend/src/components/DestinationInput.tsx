@@ -8,6 +8,8 @@ export interface SelectedDestination {
   city?: string;
   stateCode?: string;
   locationTag?: string;
+  address?: string;
+  resultKind?: 'admin' | 'street' | 'poi' | 'other';
   lat?: number;
   lon?: number;
 }
@@ -30,7 +32,7 @@ export default function DestinationInput({
   onDropdownOpenChange,
   userLat,
   userLon,
-  placeholder = 'Ex: Curitiba, PR',
+  placeholder = 'Ex: escola, posto Shell, Curitiba…',
   disabled = false,
 }: DestinationInputProps) {
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
@@ -68,7 +70,7 @@ export default function DestinationInput({
   const fetchSuggestions = useCallback(
     async (query: string) => {
       const trimmed = query.trim();
-      if (trimmed.length < 3) {
+      if (trimmed.length < 2) {
         requestIdRef.current += 1;
         setSuggestions([]);
         setDropdownOpen(false);
@@ -83,7 +85,17 @@ export default function DestinationInput({
       setLoading(true);
       try {
         const { lat, lon } = userPosRef.current;
-        const results = await searchSuggestions(trimmed, lat, lon);
+        const results = await searchSuggestions(trimmed, lat, lon, (partial) => {
+          if (id !== requestIdRef.current) return;
+          if (partial.length > 0) {
+            lastFetchedQueryRef.current = trimmed;
+            setSuggestions(partial);
+            setDropdownOpen(true);
+            setLoading(false);
+            setActiveIndex(-1);
+            updateListPosition();
+          }
+        });
         if (id !== requestIdRef.current) return;
         lastFetchedQueryRef.current = trimmed;
         setSuggestions(results);
@@ -103,7 +115,7 @@ export default function DestinationInput({
   );
 
   useEffect(() => {
-    const timer = setTimeout(() => fetchSuggestions(value), 350);
+    const timer = setTimeout(() => fetchSuggestions(value), 220);
     return () => clearTimeout(timer);
   }, [value, fetchSuggestions]);
 

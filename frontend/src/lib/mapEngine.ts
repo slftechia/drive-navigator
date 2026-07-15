@@ -3,12 +3,14 @@
  */
 import maplibregl, { Map as MapLibreMap, Marker, LngLatBoundsLike, PaddingOptions } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import { NAV_MAP_MAX_ZOOM, NAV_MAP_MIN_ZOOM } from './navCamera';
+import { MAP_STYLE_DAY } from './theme';
 
 export type Position = [number, number];
 
 let loadPromise: Promise<AtlasNamespace> | null = null;
 
-const MAP_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
+const MAP_STYLE = MAP_STYLE_DAY;
 
 export interface AtlasNamespace {
   Map: typeof AtlasMap;
@@ -23,6 +25,7 @@ export interface AtlasNamespace {
   layer: {
     LineLayer: typeof AtlasLineLayer;
     BubbleLayer: typeof AtlasBubbleLayer;
+    Layer: AtlasLineLayer | AtlasBubbleLayer;
   };
   HtmlMarker: typeof AtlasHtmlMarker;
   AuthenticationType: { subscriptionKey: string };
@@ -154,21 +157,60 @@ class AtlasHtmlMarker {
   htmlContent: string;
   anchor: string;
   zIndex?: number;
+  private pitchAlignment: 'map' | 'viewport';
+  private rotationAlignment: 'map' | 'viewport';
 
-  constructor(opts: { position: Position; htmlContent: string; anchor?: string; zIndex?: number }) {
+  constructor(opts: {
+    position: Position;
+    htmlContent: string;
+    anchor?: string;
+    zIndex?: number;
+    pitchAlignment?: 'map' | 'viewport';
+    rotationAlignment?: 'map' | 'viewport';
+  }) {
     this.position = opts.position;
     this.htmlContent = opts.htmlContent;
     this.anchor = opts.anchor ?? 'center';
     this.zIndex = opts.zIndex;
+    this.pitchAlignment = opts.pitchAlignment ?? 'viewport';
+    this.rotationAlignment = opts.rotationAlignment ?? 'viewport';
   }
 
+  /** Root estável do Marker — conteúdo vive em innerHTML (nunca troca o elemento do MapLibre). */
   attach(map: MapLibreMap) {
     const el = document.createElement('div');
-    el.innerHTML = this.htmlContent;
+    el.className = 'atlas-html-marker';
+    el.style.pointerEvents = 'none';
+    el.style.lineHeight = '0';
     if (this.zIndex != null) el.style.zIndex = String(this.zIndex);
-    this.marker = new Marker({ element: el, anchor: this.anchor as maplibregl.Anchor })
+    el.innerHTML = this.htmlContent.trim();
+    this.marker = new Marker({
+      element: el,
+      anchor: this.anchor as maplibregl.Anchor,
+      pitchAlignment: this.pitchAlignment,
+      rotationAlignment: this.rotationAlignment,
+    })
       .setLngLat(this.position)
       .addTo(map);
+  }
+
+  setLngLat(position: Position) {
+    this.position = position;
+    this.marker?.setLngLat(position);
+  }
+
+  setHtmlContent(html: string) {
+    this.htmlContent = html;
+    const el = this.marker?.getElement();
+    if (el) el.innerHTML = html.trim();
+  }
+
+  setRotation(deg: number) {
+    this.marker?.setRotation(deg);
+  }
+
+  getElement(): HTMLElement | null {
+    return this.marker?.getElement() ?? null;
   }
 
   detach() {
@@ -245,11 +287,12 @@ class AtlasMap {
   ) {
     this.map = new MapLibreMap({
       container,
-      style: MAP_STYLE,
+      style: options.style ?? MAP_STYLE,
       center: options.center ?? [-48.548, -27.595],
       zoom: options.zoom ?? 12,
-      minZoom: options.minZoom ?? 4,
-      maxPitch: 60,
+      minZoom: options.minZoom ?? NAV_MAP_MIN_ZOOM,
+      maxZoom: NAV_MAP_MAX_ZOOM,
+      maxPitch: 85,
       bearing: options.bearing ?? 0,
       pitch: options.pitch ?? 0,
       attributionControl: { compact: true },
@@ -280,8 +323,9 @@ class AtlasMap {
 
     const duration = transition?.type === 'jump' || transition?.duration === 0 ? 0 : transition?.duration ?? 0;
 
+    // minZoom pode limitar afastamento; maxZoom NÃO deve ser travado no fit da prévia
+    // (senão a navegação fica presa em visão macro).
     if (options.minZoom != null) this.map.setMinZoom(options.minZoom);
-    if (options.maxZoom != null) this.map.setMaxZoom(options.maxZoom);
 
     if (options.bounds) {
       const padding =
@@ -303,6 +347,9 @@ class AtlasMap {
       return;
     }
 
+    // Em câmera pontual, maxZoom pode ser liberado se informado.
+    if (options.maxZoom != null) this.map.setMaxZoom(options.maxZoom);
+
     const padding =
       options.padding != null
         ? typeof options.padding === 'number'
@@ -323,6 +370,14 @@ class AtlasMap {
     else this.map.jumpTo(move);
   }
 
+  setMinZoom(z: number) {
+    this.map.setMinZoom(z);
+  }
+
+  setMaxZoom(z: number) {
+    this.map.setMaxZoom(z);
+  }
+
   applyNavigationCamera(
     center: Position,
     zoom: number,
@@ -337,6 +392,9 @@ class AtlasMap {
       );
       return;
     }
+    // Sempre libera zoom alto para a visão “colada” na via.
+    this.map.setMaxZoom(Math.max(this.map.getMaxZoom(), Math.ceil(zoom) + 2, NAV_MAP_MAX_ZOOM));
+    this.map.setMinZoom(Math.min(this.map.getMinZoom(), NAV_MAP_MIN_ZOOM));
     this.map.setPadding(padding);
     const cam: maplibregl.CameraOptions = { center, zoom, bearing, pitch, padding };
     if (animate) this.map.easeTo({ ...cam, duration: 420 });
@@ -393,6 +451,7 @@ function buildAtlasNamespace(): AtlasNamespace {
     layer: {
       LineLayer: AtlasLineLayer,
       BubbleLayer: AtlasBubbleLayer,
+      Layer: null as unknown as AtlasLineLayer,
     },
     HtmlMarker: AtlasHtmlMarker,
     AuthenticationType: { subscriptionKey: 'none' },

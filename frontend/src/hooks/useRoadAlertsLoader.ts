@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react';
-import { fetchRoadAlerts } from '../api';
-import { filterAlertsOnRoute, mergeRoadAlerts } from '../lib/roadAlerts';
+import { fetchCommunityReportsAlongRoute, fetchRoadAlerts } from '../api';
+import { mergeRoadAlerts, snapAlertsToRoute } from '../lib/roadAlerts';
 import { routeProgressKm, sliceRouteWindow } from '../utils/geo';
-import type { TripPlan } from '../api';
+import type { TripPlan, RoadAlert } from '../api';
 
 interface UseRoadAlertsLoaderOptions {
   active: boolean;
@@ -29,14 +29,15 @@ export function useRoadAlertsLoader({
   const onAlertsRef = useRef(onAlerts);
   onAlertsRef.current = onAlerts;
 
-  const mergeOnRoute = (incoming: Awaited<ReturnType<typeof fetchRoadAlerts>>) => {
+  const mergeIncoming = (incoming: RoadAlert[]) => {
+    if (!incoming.length) return;
     const pts = routePointsRef.current;
-    if (!incoming.length || !pts?.length) return;
-    const onRoute = filterAlertsOnRoute(incoming, pts, 0.18);
-    if (!onRoute.length) return;
+    const snapped =
+      pts && pts.length >= 2 ? snapAlertsToRoute(incoming, pts, 0.12) : incoming;
+    if (!snapped.length) return;
     onAlertsRef.current((prev) => {
       if (!prev) return prev;
-      return { ...prev, roadAlerts: mergeRoadAlerts(prev.roadAlerts, onRoute) };
+      return { ...prev, roadAlerts: mergeRoadAlerts(prev.roadAlerts, snapped) };
     });
   };
 
@@ -44,8 +45,9 @@ export function useRoadAlertsLoader({
     const pts = routePointsRef.current;
     if (!pts?.length) return;
     const { lat, lon } = positionRef.current;
-    const windowPts = sliceRouteWindow(pts, lat, lon, 25, 55);
-    void fetchRoadAlerts(windowPts).then(mergeOnRoute);
+    const windowPts = sliceRouteWindow(pts, lat, lon, 25, 65);
+    void fetchRoadAlerts(windowPts).then(mergeIncoming);
+    void fetchCommunityReportsAlongRoute(windowPts).then(mergeIncoming);
   };
 
   useEffect(() => {
@@ -55,7 +57,6 @@ export function useRoadAlertsLoader({
     if (tokenChanged) {
       lastNavTokenRef.current = navigationStartToken;
       lastFetchKmRef.current = -999;
-      onAlertsRef.current((prev) => (prev ? { ...prev, roadAlerts: [] } : prev));
     }
 
     fetchWindow();
@@ -70,12 +71,12 @@ export function useRoadAlertsLoader({
       if (!pts?.length) return;
       const { lat, lon } = positionRef.current;
       const progressKm = routeProgressKm({ lat, lon }, pts);
-      if (Math.abs(progressKm - lastFetchKmRef.current) < 5) return;
+      if (Math.abs(progressKm - lastFetchKmRef.current) < 4) return;
       lastFetchKmRef.current = progressKm;
       fetchWindow();
     };
 
-    const id = window.setInterval(tick, 15_000);
+    const id = window.setInterval(tick, 12_000);
     return () => window.clearInterval(id);
   }, [active, routePoints, navigationStartToken]);
 }

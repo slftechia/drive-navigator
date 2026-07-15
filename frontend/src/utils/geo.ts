@@ -50,6 +50,19 @@ export function destinationPoint(
   return { lat: (φ2 * 180) / Math.PI, lon: (λ2 * 180) / Math.PI };
 }
 
+/** Bbox Photon/Nominatim: minLon,minLat,maxLon,maxLat */
+export function bboxAround(lat: number, lon: number, radiusKm: number): string {
+  const n = destinationPoint(lat, lon, 0, radiusKm);
+  const s = destinationPoint(lat, lon, 180, radiusKm);
+  const e = destinationPoint(lat, lon, 90, radiusKm);
+  const w = destinationPoint(lat, lon, 270, radiusKm);
+  const minLon = Math.min(w.lon, e.lon);
+  const maxLon = Math.max(w.lon, e.lon);
+  const minLat = Math.min(s.lat, n.lat);
+  const maxLat = Math.max(s.lat, n.lat);
+  return `${minLon},${minLat},${maxLon},${maxLat}`;
+}
+
 /** Suaviza rotação do mapa (menor salto ao virar). */
 export function smoothBearingDeg(
   prev: number | null,
@@ -173,6 +186,21 @@ export function routeProgressKm(
     ) * Math.max(0, Math.min(1, bestT));
   }
   return progress;
+}
+
+/** Comprimento total da polyline (soma haversine entre vértices). */
+export function polylineLengthKm(routePoints: Array<{ lat: number; lon: number }>): number {
+  if (routePoints.length < 2) return 0;
+  let km = 0;
+  for (let i = 1; i < routePoints.length; i++) {
+    km += haversineKm(
+      routePoints[i - 1].lat,
+      routePoints[i - 1].lon,
+      routePoints[i].lat,
+      routePoints[i].lon
+    );
+  }
+  return km;
 }
 
 /** Rumo de condução ao longo da rota (sempre sentido destino, evita mapa invertido). */
@@ -313,45 +341,13 @@ export function estimateRouteRemainder(
   };
   if (routePoints.length < 2 || totalDistanceKm <= 0) return fallback;
 
-  const step = routePoints.length > 5000 ? 3 : routePoints.length > 2000 ? 2 : 1;
-  let bestIdx = 0;
-  let bestDist = Infinity;
-  let bestT = 0;
+  const polylineKm = polylineLengthKm(routePoints);
+  if (polylineKm < 0.05) return fallback;
 
-  for (let i = 0; i < routePoints.length - step; i += step) {
-    const a = routePoints[i];
-    const b = routePoints[i + step];
-    const proj = projectOnSegment({ lat, lon }, a, b);
-    const d = haversineKm(lat, lon, proj.lat, proj.lon);
-    if (d < bestDist) {
-      bestDist = d;
-      bestIdx = i;
-      const segLen = haversineKm(a.lat, a.lon, b.lat, b.lon) || 1e-9;
-      bestT = haversineKm(a.lat, a.lon, proj.lat, proj.lon) / segLen;
-    }
-  }
-
-  let remainingKm = 0;
-  const segEnd = routePoints[bestIdx + step] ?? routePoints[bestIdx + 1];
-  if (segEnd) {
-    const segLen = haversineKm(
-      routePoints[bestIdx].lat,
-      routePoints[bestIdx].lon,
-      segEnd.lat,
-      segEnd.lon
-    );
-    remainingKm += segLen * Math.max(0, 1 - bestT);
-  }
-  for (let i = bestIdx + step; i < routePoints.length - 1; i++) {
-    remainingKm += haversineKm(
-      routePoints[i].lat,
-      routePoints[i].lon,
-      routePoints[i + 1].lat,
-      routePoints[i + 1].lon
-    );
-  }
-
-  remainingKm = Math.min(totalDistanceKm, Math.max(0, remainingKm));
+  const progressKm = routeProgressKm({ lat, lon }, routePoints);
+  const scale = totalDistanceKm / polylineKm;
+  const progressScaled = Math.min(totalDistanceKm, progressKm * scale);
+  const remainingKm = Math.max(0, totalDistanceKm - progressScaled);
   const fraction = remainingKm / totalDistanceKm;
 
   let durationRemainingMinutes: number;

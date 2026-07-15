@@ -14,6 +14,13 @@ import {
   DEFAULT_POI_CATEGORIES,
   PoiCategory,
 } from './lib/maps';
+import {
+  addCommunityReport,
+  queryCommunityReportsAlongRoute,
+  queryCommunityReportsNear,
+  reportsStats,
+  type CommunityReportType,
+} from './lib/reportsStore';
 
 export function createApp() {
   const app = express();
@@ -21,7 +28,13 @@ export function createApp() {
   app.use(express.json());
 
   app.get('/health', (_req: Request, res: Response) => {
-    res.json({ status: 'ok', service: 'drive-navigator-api', version: '0.2.0', stack: 'render+firebase+osm' });
+    res.json({
+      status: 'ok',
+      service: 'drive-navigator-api',
+      version: '0.3.0',
+      stack: 'render+firebase+osm',
+      communityReports: reportsStats().count,
+    });
   });
 
   app.get('/maps/config', (_req: Request, res: Response) => {
@@ -261,6 +274,77 @@ export function createApp() {
     } catch (err) {
       console.error('Fuel status error:', err);
       res.status(500).json({ error: String(err) });
+    }
+  });
+
+  /** Report da comunidade (memória do processo; TTL ~14 dias). */
+  app.post('/reports', (req: Request, res: Response) => {
+    try {
+      const body = req.body as {
+        type?: string;
+        lat?: number;
+        lon?: number;
+        label?: string;
+      };
+      const type = body.type as CommunityReportType | undefined;
+      if (
+        !type ||
+        (type !== 'radar' && type !== 'lombada' && type !== 'perigo') ||
+        body.lat == null ||
+        body.lon == null ||
+        !Number.isFinite(body.lat) ||
+        !Number.isFinite(body.lon)
+      ) {
+        res.status(400).json({ error: 'type, lat e lon são obrigatórios' });
+        return;
+      }
+      if (Math.abs(body.lat) > 90 || Math.abs(body.lon) > 180) {
+        res.status(400).json({ error: 'coordenadas inválidas' });
+        return;
+      }
+      const report = addCommunityReport({
+        type,
+        lat: body.lat,
+        lon: body.lon,
+        label: body.label,
+      });
+      res.json({ report });
+    } catch (err) {
+      console.error('Report create error:', err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  app.get('/reports', (req: Request, res: Response) => {
+    try {
+      const lat = req.query.lat != null ? Number(req.query.lat) : NaN;
+      const lon = req.query.lon != null ? Number(req.query.lon) : NaN;
+      const radiusKm = req.query.radiusKm != null ? Number(req.query.radiusKm) : 25;
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        res.json({ reports: [], stats: reportsStats() });
+        return;
+      }
+      const reports = queryCommunityReportsNear(lat, lon, Number.isFinite(radiusKm) ? radiusKm : 25);
+      res.json({ reports, stats: reportsStats() });
+    } catch (err) {
+      console.error('Reports query error:', err);
+      res.json({ reports: [] });
+    }
+  });
+
+  app.post('/reports/along-route', (req: Request, res: Response) => {
+    try {
+      const body = req.body as { routePoints?: Array<{ lat: number; lon: number }> };
+      const points = body.routePoints ?? [];
+      if (points.length < 2) {
+        res.json({ reports: [] });
+        return;
+      }
+      const reports = queryCommunityReportsAlongRoute(points);
+      res.json({ reports });
+    } catch (err) {
+      console.error('Reports along route error:', err);
+      res.json({ reports: [] });
     }
   });
 

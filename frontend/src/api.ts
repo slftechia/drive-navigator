@@ -1,7 +1,6 @@
 const API_BASE = import.meta.env.VITE_API_URL ?? '/api';
 
 const API_TIMEOUT_MS = 25000;
-const PLAN_TRIP_TIMEOUT_MS = 90000;
 const API_RETRY_DELAY_MS = 2500;
 
 function sleep(ms: number): Promise<void> {
@@ -42,6 +41,7 @@ export interface AddressSuggestion {
   address: string;
   lat: number;
   lon: number;
+  resultKind?: 'poi' | 'street' | 'address' | 'admin';
 }
 
 export interface RoutePoint {
@@ -182,27 +182,44 @@ export async function geocodeAddress(query: string): Promise<GeocodeResult> {
 export async function searchSuggestions(
   query: string,
   lat?: number,
-  lon?: number
+  lon?: number,
+  onPartial?: (results: AddressSuggestion[]) => void
 ): Promise<AddressSuggestion[]> {
   const trimmed = query.trim();
-  if (trimmed.length < 3) return [];
+  if (trimmed.length < 2) return [];
 
-  // Autocomplete: Photon direto no browser (rapido; evita cold start do Render Free).
+  let searchLat = lat;
+  let searchLon = lon;
+  if (
+    searchLat == null ||
+    searchLon == null ||
+    !Number.isFinite(searchLat) ||
+    !Number.isFinite(searchLon)
+  ) {
+    try {
+      const pos = await getCurrentPosition();
+      searchLat = pos.coords.latitude;
+      searchLon = pos.coords.longitude;
+    } catch {
+      /* busca nacional sem GPS */
+    }
+  }
+
   try {
     const { searchSuggestionsDirect } = await import('./lib/mapsSearch');
-    const direct = await searchSuggestionsDirect(trimmed, lat, lon);
+    const direct = await searchSuggestionsDirect(trimmed, searchLat, searchLon, onPartial);
     if (direct.length > 0) return direct;
   } catch {
     /* tenta API abaixo */
   }
 
   const params = new URLSearchParams({ q: trimmed });
-  if (lat !== undefined) params.set('lat', String(lat));
-  if (lon !== undefined) params.set('lon', String(lon));
+  if (searchLat !== undefined) params.set('lat', String(searchLat));
+  if (searchLon !== undefined) params.set('lon', String(searchLon));
   try {
     const data = await apiFetch<{ suggestions: AddressSuggestion[] }>(
       `/search/suggestions?${params.toString()}`,
-      { timeoutMs: 55000 }
+      { timeoutMs: 20_000 }
     );
     return data.suggestions;
   } catch {
@@ -233,21 +250,28 @@ export async function fetchSpeedLimit(lat: number, lon: number): Promise<{
 
 export async function fetchRoadAlerts(routePoints: RoutePoint[]): Promise<RoadAlert[]> {
   if (routePoints.length < 2) return [];
-  const data = await apiFetch<{ roadAlerts: RoadAlert[] }>('/trip/road-alerts', {
-    method: 'POST',
-    body: JSON.stringify({ routePoints: sampleRoutePointsForApi(routePoints) }),
-    timeoutMs: 55000,
-  });
-  return data.roadAlerts ?? [];
+  const { fetchRoadAlertsDirect } = await import('./lib/roadAlertsDirect');
+  const { snapAlertsToRoute } = await import('./lib/roadAlerts');
+  const alerts = await fetchRoadAlertsDirect(routePoints);
+  return snapAlertsToRoute(alerts, routePoints, 0.12);
 }
 
 export async function fetchRoadAlertsNear(lat: number, lon: number, radiusM = 3500): Promise<RoadAlert[]> {
-  const data = await apiFetch<{ roadAlerts: RoadAlert[] }>('/trip/road-alerts-near', {
-    method: 'POST',
-    body: JSON.stringify({ lat, lon, radiusM }),
-    timeoutMs: 15000,
-  });
-  return data.roadAlerts ?? [];
+  try {
+    const data = await apiFetch<{ roadAlerts: RoadAlert[] }>('/trip/road-alerts-near', {
+      method: 'POST',
+      body: JSON.stringify({ lat, lon, radiusM }),
+      timeoutMs: 15000,
+    });
+    if (data.roadAlerts?.length) return data.roadAlerts;
+  } catch {
+    /* fallback abaixo */
+  }
+  const { fetchRoadAlertsDirect } = await import('./lib/roadAlertsDirect');
+  return fetchRoadAlertsDirect([
+    { lat, lon },
+    { lat: lat + 0.02, lon: lon + 0.02 },
+  ]);
 }
 
 export async function fetchTripPois(params: {
@@ -273,27 +297,29 @@ export async function planTrip(params: {
   stopIntervalMinutes: number;
   categories?: string[];
 }): Promise<TripPlan> {
+  const { planTripDirect } = await import('./lib/tripPlanDirect');
+  return planTripDirect(params);
+}
+
+/** Enriquece rota rápida com alternativas/pedágios da API (segundo plano). */
+export async function enrichTripFromApi(
+  params: Parameters<typeof planTrip>[0],
+  current: TripPlan
+): Promise<TripPlan> {
   try {
-    return await apiFetch<TripPlan>('/trip/plan', {
+    const api = await apiFetch<TripPlan>('/trip/plan', {
       method: 'POST',
       body: JSON.stringify(params),
-      timeoutMs: PLAN_TRIP_TIMEOUT_MS,
-      retries: 1,
+      timeoutMs: 22_000,
+      retries: 0,
     });
-  } catch (err) {
-    const raw = err instanceof Error ? err : new Error(String(err));
-    const canFallback =
-      isNetworkFetchError(err) ||
-      /demorou demais|servidor|conectar|fetch failed|failed to fetch|Erro na API \(5/i.test(raw.message);
-
-    if (!canFallback) throw raw;
-
-    try {
-      const { planTripDirect } = await import('./lib/tripPlanDirect');
-      return await planTripDirect(params);
-    } catch (directErr) {
-      throw directErr instanceof Error ? directErr : new Error(String(directErr));
-    }
+    return {
+      ...api,
+      pois: current.pois?.length ? current.pois : api.pois,
+      roadAlerts: current.roadAlerts?.length ? current.roadAlerts : api.roadAlerts,
+    };
+  } catch {
+    return current;
   }
 }
 
@@ -308,6 +334,81 @@ export async function getFuelStatus(params: {
     method: 'POST',
     body: JSON.stringify(params),
   });
+}
+
+export interface CommunityReport {
+  id: string;
+  type: RoadAlert['type'];
+  lat: number;
+  lon: number;
+  label: string;
+  createdAt: number;
+  confirms: number;
+}
+
+export async function submitCommunityReport(params: {
+  type: RoadAlert['type'];
+  lat: number;
+  lon: number;
+  label?: string;
+}): Promise<CommunityReport | null> {
+  try {
+    const data = await apiFetch<{ report: CommunityReport }>('/reports', {
+      method: 'POST',
+      body: JSON.stringify(params),
+      timeoutMs: 10_000,
+    });
+    return data.report;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchCommunityReportsNear(
+  lat: number,
+  lon: number,
+  radiusKm = 30
+): Promise<RoadAlert[]> {
+  try {
+    const params = new URLSearchParams({
+      lat: String(lat),
+      lon: String(lon),
+      radiusKm: String(radiusKm),
+    });
+    const data = await apiFetch<{ reports: CommunityReport[] }>(`/reports?${params}`, {
+      timeoutMs: 10_000,
+    });
+    return (data.reports ?? []).map((r) => ({
+      id: r.id,
+      type: r.type,
+      lat: r.lat,
+      lon: r.lon,
+      label: r.confirms > 1 ? `${r.label} · ${r.confirms}x` : r.label,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchCommunityReportsAlongRoute(
+  routePoints: RoutePoint[]
+): Promise<RoadAlert[]> {
+  try {
+    const data = await apiFetch<{ reports: CommunityReport[] }>('/reports/along-route', {
+      method: 'POST',
+      body: JSON.stringify({ routePoints: sampleRoutePointsForApi(routePoints, 400) }),
+      timeoutMs: 12_000,
+    });
+    return (data.reports ?? []).map((r) => ({
+      id: r.id,
+      type: r.type,
+      lat: r.lat,
+      lon: r.lon,
+      label: r.confirms > 1 ? `${r.label} · ${r.confirms}x` : r.label,
+    }));
+  } catch {
+    return [];
+  }
 }
 
 export function loadVehicleConfig(): VehicleConfig {
@@ -326,18 +427,23 @@ export function saveVehicleConfig(config: VehicleConfig): void {
   localStorage.setItem('drive-nav-vehicle', JSON.stringify(config));
 }
 
-export function getCurrentPosition(): Promise<GeolocationPosition> {
+function readPosition(
+  highAccuracy: boolean
+): Promise<GeolocationPosition> {
   return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
-      reject(new Error('Geolocalização não suportada'));
-      return;
-    }
     navigator.geolocation.getCurrentPosition(resolve, reject, {
-      enableHighAccuracy: true,
-      timeout: 15000,
-      maximumAge: 10000,
+      enableHighAccuracy: highAccuracy,
+      timeout: highAccuracy ? 25_000 : 35_000,
+      maximumAge: highAccuracy ? 8_000 : 120_000,
     });
   });
+}
+
+export function getCurrentPosition(): Promise<GeolocationPosition> {
+  if (!navigator.geolocation) {
+    return Promise.reject(new Error('Geolocalização não suportada'));
+  }
+  return readPosition(true).catch(() => readPosition(false));
 }
 
 export function watchPosition(
@@ -346,7 +452,10 @@ export function watchPosition(
 ): number {
   return navigator.geolocation.watchPosition(onUpdate, onError, {
     enableHighAccuracy: true,
-    timeout: 15000,
-    maximumAge: 3000,
+    maximumAge: 5_000,
   });
+}
+
+export function isGpsPermissionDenied(err: GeolocationPositionError): boolean {
+  return err.code === err.PERMISSION_DENIED;
 }

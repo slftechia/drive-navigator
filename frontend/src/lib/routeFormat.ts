@@ -12,11 +12,13 @@ export function formatEtaTime(date: Date): string {
   return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
-/** Duração restante no formato 9:28 h. */
+/** Duração restante estilo Waze: "4 min" ou "1 h 12 min". */
 export function formatDurationClock(minutes: number): string {
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return `${h}:${m.toString().padStart(2, '0')} h`;
+  const total = Math.max(0, Math.round(minutes));
+  if (total < 60) return `${Math.max(1, total)} min`;
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return m > 0 ? `${h} h ${m} min` : `${h} h`;
 }
 
 /** Distância restante na barra de navegação (metros quando &lt; 1 km). */

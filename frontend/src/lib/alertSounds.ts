@@ -7,6 +7,8 @@ export interface AlertSoundSettings {
   radar: boolean;
   lombada: boolean;
   voice: boolean;
+  /** Voz das manobras (turn-by-turn) durante a navegação. */
+  navGuidance: boolean;
 }
 
 const STORAGE_KEY = 'drive-nav-alert-sounds';
@@ -16,6 +18,7 @@ export const DEFAULT_ALERT_SOUND_SETTINGS: AlertSoundSettings = {
   radar: true,
   lombada: true,
   voice: true,
+  navGuidance: true,
 };
 
 export function loadAlertSoundSettings(): AlertSoundSettings {
@@ -28,6 +31,7 @@ export function loadAlertSoundSettings(): AlertSoundSettings {
       radar: parsed.radar ?? true,
       lombada: parsed.lombada ?? true,
       voice: parsed.voice ?? true,
+      navGuidance: parsed.navGuidance ?? true,
     };
   } catch {
     return { ...DEFAULT_ALERT_SOUND_SETTINGS };
@@ -147,7 +151,7 @@ export function checkRoadAlertSounds(
 
     const distM = haversineKm(lat, lon, alert.lat, alert.lon) * 1000;
     for (const threshold of ALERT_SOUND_THRESHOLDS_M) {
-      if (distM > threshold || distM < threshold - 65) continue;
+      if (distM > threshold) continue;
       let buckets = announced.get(alert.id);
       if (!buckets) {
         buckets = new Set();

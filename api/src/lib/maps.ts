@@ -553,38 +553,45 @@ async function fetchOsrmRoutes(options: RouteOptions): Promise<OsrmRoute[]> {
 
 async function countTollsOnRoute(points: Array<{ lat: number; lon: number }>): Promise<number> {
   if (points.length < 2) return 0;
-  const samples = sampleAlongRoute(points, Math.min(8, sampleCountForRoute(points)));
+  const samples = sampleAlongRoute(points, Math.min(5, sampleCountForRoute(points)));
   const clauses = samples.map((p) => {
     const lat = p.lat.toFixed(5);
     const lon = p.lon.toFixed(5);
-    return `node(around:800,${lat},${lon})["barrier"="toll_booth"];`;
+    return `node(around:700,${lat},${lon})["barrier"="toll_booth"];`;
   });
-  const query = `[out:json][timeout:15];\n(\n  ${clauses.join('\n  ')}\n);\nout center;`;
+  const query = `[out:json][timeout:8];\n(\n  ${clauses.join('\n  ')}\n);\nout center;`;
 
-  for (const endpoint of OVERPASS_ENDPOINTS) {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 12000);
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'User-Agent': USER_AGENT,
-          Accept: 'application/json',
-        },
-        body: `data=${encodeURIComponent(query)}`,
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-      if (!res.ok) continue;
-      const data = (await res.json()) as { elements?: Array<{ id: number }> };
-      const ids = new Set((data.elements ?? []).map((e) => e.id));
-      return ids.size;
-    } catch {
-      continue;
-    }
-  }
-  return 0;
+  const race = Promise.race<number>([
+    (async () => {
+      for (const endpoint of OVERPASS_ENDPOINTS) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 6000);
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'User-Agent': USER_AGENT,
+              Accept: 'application/json',
+            },
+            body: `data=${encodeURIComponent(query)}`,
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
+          if (!res.ok) continue;
+          const data = (await res.json()) as { elements?: Array<{ id: number }> };
+          const ids = new Set((data.elements ?? []).map((e) => e.id));
+          return ids.size;
+        } catch {
+          continue;
+        }
+      }
+      return 0;
+    })(),
+    new Promise<number>((resolve) => setTimeout(() => resolve(0), 5000)),
+  ]);
+
+  return race;
 }
 
 function buildRouteAlternative(
@@ -628,14 +635,18 @@ export async function calculateRouteAlternatives(
   const withTolls = buildRouteAlternative('with_tolls', 'with_tolls', 'Com pedágios', primary, primaryTolls);
   const alternatives: RouteAlternative[] = [withTolls];
 
-  for (let i = 1; i < routes.length; i++) {
-    const altRoute = routes[i];
+  const altTollPromises = routes.slice(1).map((altRoute) => {
     const altPoints = decodePolyline(altRoute.geometry);
-    const altTolls = await countTollsOnRoute(altPoints);
+    return countTollsOnRoute(altPoints).then((altTolls) => ({ altRoute, altTolls }));
+  });
+  const altResults = await Promise.all(altTollPromises);
+
+  for (let i = 0; i < altResults.length; i++) {
+    const { altRoute, altTolls } = altResults[i];
     const candidate = buildRouteAlternative(
-      altTolls < primaryTolls ? 'no_tolls' : `alt_${i}`,
+      altTolls < primaryTolls ? 'no_tolls' : `alt_${i + 1}`,
       altTolls < primaryTolls ? 'no_tolls' : 'with_tolls',
-      altTolls < primaryTolls ? 'Sem pedágios' : `Alternativa ${i}`,
+      altTolls < primaryTolls ? 'Sem pedágios' : `Alternativa ${i + 1}`,
       altRoute,
       altTolls,
       altTolls === 0
@@ -646,7 +657,8 @@ export async function calculateRouteAlternatives(
   }
 
   alternatives.sort((a, b) => a.totalDurationMinutes - b.totalDurationMinutes);
-  const defaultId = alternatives[0]?.id ?? 'with_tolls';
+  // Rota principal = primeira do OSRM (routes[0]), não a alternativa mais rápida por tempo.
+  const defaultId = 'with_tolls';
   return { alternatives, defaultId };
 }
 
@@ -932,10 +944,10 @@ export function filterPoisOnRoute(
     .sort((a, b) => (a.distanceFromRouteKm ?? 0) - (b.distanceFromRouteKm ?? 0));
 }
 
-const ALERT_CORRIDOR_KM = 0.28;
-const OVERPASS_RADIUS_M = 2800;
-const OVERPASS_SAMPLES = 12;
-const OVERPASS_BATCH_SIZE = 2;
+const ALERT_CORRIDOR_KM = 0.45;
+const OVERPASS_RADIUS_M = 3500;
+const OVERPASS_SAMPLES = 16;
+const OVERPASS_BATCH_SIZE = 4;
 
 const OVERPASS_HEADERS = {
   'Content-Type': 'application/x-www-form-urlencoded',
@@ -959,7 +971,7 @@ function routeLengthKmFromPoints(routePoints: Array<{ lat: number; lon: number }
 
 function sampleCountForRoute(routePoints: Array<{ lat: number; lon: number }>): number {
   const km = routeLengthKmFromPoints(routePoints);
-  return Math.min(50, Math.max(OVERPASS_SAMPLES, Math.ceil(km / 20)));
+  return Math.min(64, Math.max(OVERPASS_SAMPLES, Math.ceil(km / 14)));
 }
 
 function sampleAlongRoute(
@@ -982,12 +994,16 @@ function buildSampledOverpassQuery(samples: Array<{ lat: number; lon: number }>)
     const lat = p.lat.toFixed(5);
     const lon = p.lon.toFixed(5);
     clauses.push(`node(around:${OVERPASS_RADIUS_M},${lat},${lon})["highway"="speed_camera"];`);
+    clauses.push(`way(around:${OVERPASS_RADIUS_M},${lat},${lon})["highway"="speed_camera"];`);
     clauses.push(`node(around:${OVERPASS_RADIUS_M},${lat},${lon})["enforcement"="maxspeed"];`);
+    clauses.push(`node(around:${OVERPASS_RADIUS_M},${lat},${lon})["enforcement"="traffic"];`);
+    clauses.push(`node(around:${OVERPASS_RADIUS_M},${lat},${lon})["traffic_enforcement"];`);
     clauses.push(`node(around:${OVERPASS_RADIUS_M},${lat},${lon})["traffic_calming"];`);
     clauses.push(`way(around:${OVERPASS_RADIUS_M},${lat},${lon})["traffic_calming"];`);
     clauses.push(`node(around:${OVERPASS_RADIUS_M},${lat},${lon})["man_made"="surveillance"]["surveillance:type"="speed"];`);
+    clauses.push(`node(around:${OVERPASS_RADIUS_M},${lat},${lon})["man_made"="surveillance"]["surveillance:type"="camera"];`);
   }
-  return `[out:json][timeout:25];\n(\n  ${clauses.join('\n  ')}\n);\nout center;`;
+  return `[out:json][timeout:25];\n(\n  ${clauses.join('\n  ')}\n);\nout center tags;`;
 }
 
 function parseAlertTags(
@@ -1003,7 +1019,9 @@ function parseAlertTags(
   if (
     tags.highway === 'speed_camera' ||
     tags.enforcement === 'maxspeed' ||
-    (tags.man_made === 'surveillance' && tags['surveillance:type'] === 'speed')
+    tags.enforcement === 'traffic' ||
+    /speed|camera|radar/i.test(tags.traffic_enforcement ?? '') ||
+    (tags.man_made === 'surveillance' && /speed|camera/i.test(tags['surveillance:type'] ?? ''))
   ) {
     type = 'radar';
     label = 'Radar';
@@ -1043,12 +1061,16 @@ function buildNearPointOverpassQuery(lat: number, lon: number, radiusM: number):
   return `[out:json][timeout:12];
 (
   node(around:${radiusM},${latS},${lonS})["highway"="speed_camera"];
+  way(around:${radiusM},${latS},${lonS})["highway"="speed_camera"];
   node(around:${radiusM},${latS},${lonS})["enforcement"="maxspeed"];
+  node(around:${radiusM},${latS},${lonS})["enforcement"="traffic"];
+  node(around:${radiusM},${latS},${lonS})["traffic_enforcement"];
   node(around:${radiusM},${latS},${lonS})["traffic_calming"];
   way(around:${radiusM},${latS},${lonS})["traffic_calming"];
   node(around:${radiusM},${latS},${lonS})["man_made"="surveillance"]["surveillance:type"="speed"];
+  node(around:${radiusM},${latS},${lonS})["man_made"="surveillance"]["surveillance:type"="camera"];
 );
-out center;`;
+out center tags;`;
 }
 
 export async function searchRoadAlertsNearPoint(

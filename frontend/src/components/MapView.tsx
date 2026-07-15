@@ -1,16 +1,15 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
-import type { RouteInstruction, RoutePoint, RoadAlert } from '../api';
+import type { RouteInstruction, RoutePoint, RoadAlert, PoiResult } from '../api';
 import { loadAzureMaps, type AtlasNamespace } from '../lib/mapEngine';
+import { mapStyleForTheme, routeColorsForTheme, type AppTheme } from '../lib/theme';
 import type { DataSourceInstance, HtmlMarkerInstance, MapInstance, MapPosition } from '../lib/atlasTypes';
 import {
   alertMarkerHtml,
-  dedupeAlertsNearby,
-  dedupeGapForZoom,
-  filterAlertsOnRoute,
-  filterMapAlerts,
   isMapAlertType,
-  maxAlertsForZoom,
+  pickAlertsForMap,
 } from '../lib/roadAlerts';
+import { pickFuelPoisForMap } from '../lib/poisDirect';
+import { fuelMarkerHtml, destinationMarkerHtml } from '../lib/mapMarkers';
 import { turnMapMarkerHtml } from '../lib/turnIcons';
 import { vehicleMarkerHtml } from '../lib/vehicleMarker';
 import {
@@ -21,6 +20,9 @@ import {
   ZOOM_NAV_FLAT,
   ZOOM_NAV_MIN_ACTIVE,
   ZOOM_NAV_MAX,
+  NAV_ZOOM_MANUAL_DELTA,
+  NAV_MAP_MIN_ZOOM,
+  NAV_MAP_MAX_ZOOM,
   isMobileViewport,
 } from '../lib/navCamera';
 import {
@@ -29,7 +31,6 @@ import {
   haversineKm,
   smoothBearingDeg,
   snapPointToRoute,
-  routeProgressKm,
   routeHeadingAtPoint,
 } from '../utils/geo';
 
@@ -43,6 +44,7 @@ interface MapViewProps {
   routeOrigin?: { lat: number; lon: number };
   destination?: { lat: number; lon: number };
   roadAlerts?: RoadAlert[];
+  fuelPois?: PoiResult[];
   nextManeuver?: RouteInstruction | null;
   mode?: MapMode;
   layoutKey?: string;
@@ -51,9 +53,12 @@ interface MapViewProps {
   followingGps?: boolean;
   routeOverviewActive?: boolean;
   routeOverviewToken?: number;
+  previewFitToken?: number;
   recenterToken?: number;
   routeAlternatives?: Array<{ id: string; points: RoutePoint[] }>;
   selectedRouteId?: string;
+  mapTheme?: AppTheme;
+  onFuelPoiClick?: (poi: PoiResult) => void;
 }
 
 const ZOOM_HOME = 15;
@@ -73,15 +78,15 @@ const ROUTE_SIMPLIFY_MIN_KM = 0.018;
 const ROUTE_SIMPLIFY_OVERVIEW_KM = 0.004;
 const ROUTE_POINTS_OVERVIEW_LINE = 8000;
 const ALERTS_MAX_PREVIEW = 180;
-const FOLLOW_MIN_INTERVAL_MS = 1800;
-const FOLLOW_MIN_MOVE_KM = 0.02;
-const HEADING_CAMERA_MIN_DEG = 4;
+const FOLLOW_MIN_INTERVAL_MS = 500;
+const FOLLOW_MIN_MOVE_KM = 0.008;
+const HEADING_CAMERA_MIN_DEG = 2.5;
 const ROUTE_LOOKAHEAD_KM = 0.09;
-const GPS_HEADING_MIN_SPEED_MPS = 2.2;
+const GPS_HEADING_MIN_SPEED_MPS = 0.8;
 /** GPS a mais de X km da rota: câmera e marcador usam o início da rota (evita mapa na África). */
 /** Distância máxima da polyline para considerar GPS “na rota”. */
 const GPS_ON_ROUTE_MAX_KM = 0.22;
-const NAV_SNAP_TO_START_MS = 45000;
+const NAV_SNAP_TO_START_MS = 12000;
 const NAV_CAMERA_GUARD_MS = 8000;
 
 /** Mantém formato da via: distância mínima entre pontos, não pula vértices de canto. */
@@ -216,76 +221,13 @@ function mapCameraCenter(map: MapInstance | null): { lat: number; lon: number } 
 }
 
 function visibleRadiusKmForZoom(zoom: number | null): number {
-  const mobileBoost = isMobileViewport() ? 1.5 : 1;
-  let km = 18;
-  if (zoom == null || !Number.isFinite(zoom)) km = 18;
-  else if (zoom >= 18) km = 2.2;
-  else if (zoom >= 17) km = 3.5;
-  else if (zoom >= 16) km = 5.5;
-  else if (zoom >= 15) km = 8;
-  else if (zoom >= 14) km = 12;
-  else if (zoom >= 12) km = 22;
-  else if (zoom >= 10) km = 45;
-  else km = 90;
-  return km * mobileBoost;
-}
-
-/** Alertas perto do centro visível do mapa (bounds da câmera costuma ficar desatualizado). */
-function filterAlertsNearMapView(
-  alerts: RoadAlert[],
-  map: MapInstance,
-  zoom: number | null
-): RoadAlert[] {
-  const focus = mapCameraCenter(map);
-  if (!focus) return alerts;
-
-  const radiusKm = visibleRadiusKmForZoom(zoom);
-  const near = alerts.filter(
-    (a) => haversineKm(focus.lat, focus.lon, a.lat, a.lon) <= radiusKm
-  );
-  return near.length > 0 ? near : alerts;
-}
-
-function pickAlertsForMap(
-  alerts: RoadAlert[] | undefined,
-  mode: MapMode,
-  userPosition: { lat: number; lon: number },
-  routePoints?: RoutePoint[],
-  opts: {
-    zoom?: number | null;
-    routeOverview?: boolean;
-    followingGps?: boolean;
-    map?: MapInstance | null;
-  } = {}
-): RoadAlert[] {
-  if (!alerts?.length || mode === 'idle') return [];
-  let pool = filterMapAlerts(alerts).filter((a) => isValidCoord(a.lat, a.lon));
-
-  const { zoom = null, map = null, routeOverview = false } = opts;
-  const dedupeGap = dedupeGapForZoom(zoom);
-  const max = Math.min(ALERTS_MAX_PREVIEW, maxAlertsForZoom(zoom));
-
-  if (routePoints && routePoints.length >= 2) {
-    const snapKm = routeOverview ? 0.22 : 0.16;
-    pool = filterAlertsOnRoute(pool, routePoints, snapKm);
-  }
-  if (!pool.length) return [];
-
-  if (mode === 'navigate' && routePoints && routePoints.length >= 2) {
-    const userKm = routeProgressKm(userPosition, routePoints);
-    const aheadKm = routeOverview ? 120 : isMobileViewport() ? 20 : 16;
-    const behindKm = routeOverview ? 30 : 2;
-    pool = pool.filter((a) => {
-      const aKm = routeProgressKm(a, routePoints);
-      return aKm >= userKm - behindKm && aKm <= userKm + aheadKm;
-    });
-  } else if (map) {
-    const focus = mapCameraCenter(map) ?? userPosition;
-    const radiusKm = Math.min(visibleRadiusKmForZoom(zoom), routeOverview ? 80 : 18);
-    pool = pool.filter((a) => haversineKm(focus.lat, focus.lon, a.lat, a.lon) <= radiusKm);
-  }
-
-  return dedupeAlertsNearby(pool, dedupeGap).slice(0, max);
+  if (zoom == null || !Number.isFinite(zoom)) return 6;
+  if (zoom >= 17) return 2.2;
+  if (zoom >= 16) return 3.5;
+  if (zoom >= 15) return 5;
+  if (zoom >= 14) return 7;
+  if (zoom >= 12) return 10;
+  return 12;
 }
 
 const NORTH_UP_CAMERA = { bearing: 0, pitch: 0 } as const;
@@ -440,6 +382,7 @@ export default function MapView({
   routeOrigin,
   destination,
   roadAlerts,
+  fuelPois,
   nextManeuver = null,
   userHeading = null,
   userSpeedMps = null,
@@ -450,19 +393,25 @@ export default function MapView({
   followingGps = true,
   routeOverviewActive = false,
   routeOverviewToken = 0,
+  previewFitToken = 0,
   recenterToken = 0,
   routeAlternatives,
   selectedRouteId,
+  mapTheme = 'day',
+  onFuelPoiClick,
 }: MapViewProps) {
+  const themeRef = useRef(mapTheme);
+  themeRef.current = mapTheme;
   const mapRef = useRef<HTMLDivElement>(null);
   const atlasRef = useRef<AtlasNamespace | null>(null);
   const mapInstance = useRef<MapInstance | null>(null);
   const routeDsRef = useRef<DataSourceInstance | null>(null);
   const altRouteDsRef = useRef<DataSourceInstance | null>(null);
-  const alertDsRef = useRef<DataSourceInstance | null>(null);
   const alertMarkersRef = useRef<HtmlMarkerInstance[]>([]);
+  const fuelMarkersRef = useRef<HtmlMarkerInstance[]>([]);
   const turnMarkerRef = useRef<HtmlMarkerInstance | null>(null);
   const destDsRef = useRef<DataSourceInstance | null>(null);
+  const destMarkerRef = useRef<HtmlMarkerInstance | null>(null);
   const vehicleMarkerRef = useRef<HtmlMarkerInstance | null>(null);
   const lastVehicleHeadingRef = useRef<number | null>(null);
   const lastVehiclePosRef = useRef<{ lat: number; lon: number } | null>(null);
@@ -494,6 +443,7 @@ export default function MapView({
   routePointsRef.current = routePoints;
   routeOriginRef.current = routeOrigin;
   userPositionRef.current = userPosition;
+
   const routeRedrawRef = useRef<(() => void) | null>(null);
   const interactionEndRedrawRef = useRef<(() => void) | null>(null);
   if (!interactionEndRedrawRef.current) {
@@ -531,13 +481,18 @@ export default function MapView({
     if (programmaticCameraRef.current) return;
     if (Date.now() < navCameraGuardUntilRef.current) return;
     if (modeRef.current !== 'navigate') return;
-    navFollowPauseUntilRef.current = Date.now() + (fromZoom ? 120_000 : 90_000);
+    // Mantém o mapa explorável até o usuário tocar em Recentralizar.
+    navFollowPauseUntilRef.current = Date.now() + (fromZoom ? 60_000 : 60_000);
     manualExploreLockRef.current = true;
+    try {
+      mapInstance.current?.setMaxZoom?.(NAV_MAP_MAX_ZOOM);
+    } catch {
+      /* ignore */
+    }
     if (followRef.current) {
       followRef.current = false;
       onFollowChangeRef.current?.(false);
     }
-    if (!fromZoom) navPitchEnabledRef.current = false;
   }, []);
 
   const resizeMapImmediate = useCallback(() => {
@@ -630,7 +585,7 @@ export default function MapView({
           lastVehiclePosRef.current,
           lastNavBearingRef.current
         );
-        let bearing = smoothBearingDeg(lastNavBearingRef.current, rawHeading, 0.42);
+    let bearing = smoothBearingDeg(lastNavBearingRef.current, rawHeading, 0.65);
         if (!Number.isFinite(bearing)) bearing = 0;
         lastNavBearingRef.current = bearing;
         lastAppliedHeadingRef.current = rawHeading;
@@ -726,41 +681,69 @@ export default function MapView({
 
   forceNavCameraRef.current = forceNavCamera;
 
-  const showFullRouteOverview = useCallback(() => {
-    const map = mapInstance.current;
-    const atlas = atlasRef.current;
-    const pts = routePointsRef.current;
-    if (!mapReadyRef.current || !map || !atlas || !pts || pts.length < 2) return;
+  const fitRouteBounds = useCallback(
+    (opts: { maxZoom: number; padding: { top: number; bottom: number; left: number; right: number } }) => {
+      const map = mapInstance.current;
+      const atlas = atlasRef.current;
+      const pts = routePointsRef.current;
+      if (!mapReadyRef.current || !map || !atlas || !pts || pts.length < 2) return;
 
-    const simplified = simplifyRoutePoints(pts, ROUTE_POINTS_OVERVIEW_LINE, ROUTE_SIMPLIFY_OVERVIEW_KM).filter(
-      (p) => isValidCoord(p.lat, p.lon)
-    );
-    if (simplified.length < 2) return;
-
-    const positions = simplified.map((p) => [Number(p.lon), Number(p.lat)] as MapPosition);
-    markProgrammaticCamera();
-    try {
-      map.setCamera(
-        {
-          bounds: atlas.data.BoundingBox.fromPositions(positions),
-          padding: { top: 96, bottom: 128, left: 40, right: 40 },
-          minZoom: ZOOM_MIN_OVERVIEW,
-          maxZoom: ZOOM_ROUTE_OVERVIEW_MAX,
-          bearing: 0,
-          pitch: 0,
-        },
-        CAMERA_JUMP
+      const simplified = simplifyRoutePoints(pts, ROUTE_POINTS_OVERVIEW_LINE, ROUTE_SIMPLIFY_OVERVIEW_KM).filter(
+        (p) => isValidCoord(p.lat, p.lon)
       );
-    } catch {
-      /* ignore invalid bounds */
-    }
-    routeRedrawRef.current?.(true);
-  }, [markProgrammaticCamera]);
+      if (simplified.length < 2) return;
+
+      const positions = simplified.map((p) => [Number(p.lon), Number(p.lat)] as MapPosition);
+      markProgrammaticCamera();
+      try {
+        map.setCamera(
+          {
+            bounds: atlas.data.BoundingBox.fromPositions(positions),
+            padding: opts.padding,
+            minZoom: ZOOM_MIN_OVERVIEW,
+            maxZoom: opts.maxZoom,
+            bearing: 0,
+            pitch: 0,
+          },
+          CAMERA_JUMP
+        );
+      } catch {
+        /* ignore invalid bounds */
+      }
+      routeRedrawRef.current?.(true);
+    },
+    [markProgrammaticCamera]
+  );
+
+  const showFullRouteOverview = useCallback(() => {
+    fitRouteBounds({
+      maxZoom: ZOOM_ROUTE_OVERVIEW_MAX,
+      padding: { top: 96, bottom: 128, left: 40, right: 40 },
+    });
+  }, [fitRouteBounds]);
+
+  const showPreviewRoute = useCallback(() => {
+    fitRouteBounds({
+      maxZoom: ZOOM_PREVIEW_MAX,
+      padding: { top: 72, bottom: 220, left: 32, right: 32 },
+    });
+  }, [fitRouteBounds]);
 
   useEffect(() => {
     if (!mapReady || !routeOverviewActive || routeOverviewToken === 0) return;
     showFullRouteOverview();
   }, [mapReady, routeOverviewActive, routeOverviewToken, showFullRouteOverview]);
+
+  useEffect(() => {
+    if (!mapReady || mode !== 'preview' || previewFitToken === 0) return;
+    showPreviewRoute();
+  }, [mapReady, mode, previewFitToken, showPreviewRoute]);
+
+  useEffect(() => {
+    if (!mapReady || mode !== 'preview' || !routePoints || routePoints.length < 2) return;
+    if (previewFitToken > 0) return;
+    showPreviewRoute();
+  }, [mapReady, mode, routePoints, selectedRouteId, previewFitToken, showPreviewRoute]);
 
   useEffect(() => {
     const container = mapRef.current;
@@ -787,12 +770,14 @@ export default function MapView({
         return;
       }
 
+      const colors = routeColorsForTheme(themeRef.current);
       map = new atlas.Map(container, {
         center: isValidCoord(userPosition.lat, userPosition.lon)
           ? [userPosition.lon, userPosition.lat]
           : [-48.548, -27.595],
         zoom: ZOOM_HOME,
         minZoom: ZOOM_MIN_NAV,
+        style: mapStyleForTheme(themeRef.current),
         ...NORTH_UP_CAMERA,
         ...MAP_INTERACTION,
       });
@@ -826,40 +811,31 @@ export default function MapView({
       const routeDs = new atlas.source.DataSource();
       const altRouteDs = new atlas.source.DataSource();
       const destDs = new atlas.source.DataSource();
-      const alertDs = new atlas.source.DataSource();
       map.sources.add(altRouteDs);
       map.sources.add(routeDs);
       map.sources.add(destDs);
-      map.sources.add(alertDs);
       routeDsRef.current = routeDs;
       altRouteDsRef.current = altRouteDs;
       destDsRef.current = destDs;
-      alertDsRef.current = alertDs;
 
       const baseLayers: atlas.layer.Layer[] = [
         new atlas.layer.LineLayer(altRouteDs, 'alt-route-line', {
-          strokeColor: '#64748b',
+          strokeColor: colors.alt,
           strokeWidth: 6,
           lineJoin: 'round',
           lineCap: 'round',
         }),
         new atlas.layer.LineLayer(routeDs, 'route-outline', {
-          strokeColor: '#4c1d95',
+          strokeColor: colors.casing,
           strokeWidth: 12,
           lineJoin: 'round',
           lineCap: 'round',
         }),
         new atlas.layer.LineLayer(routeDs, 'route-line', {
-          strokeColor: '#7c3aed',
+          strokeColor: colors.main,
           strokeWidth: 8,
           lineJoin: 'round',
           lineCap: 'round',
-        }),
-        new atlas.layer.BubbleLayer(destDs, 'dest-dot', {
-          radius: 9,
-          color: '#1d4ed8',
-          strokeColor: '#fff',
-          strokeWidth: 2,
         }),
       ];
 
@@ -888,6 +864,15 @@ export default function MapView({
       };
       map.events.add('zoomend', () => {
         refreshMapView();
+        if (!programmaticCameraRef.current && modeRef.current === 'navigate' && !routeOverviewRef.current) {
+          const z = map.getCamera()?.zoom;
+          if (z != null && Number.isFinite(z)) {
+            const target = navTargetZoom(navPitchForViewport());
+            if (Math.abs(z - target) > NAV_ZOOM_MANUAL_DELTA) {
+              pauseGpsFollow(true);
+            }
+          }
+        }
         interactionEndRedrawRef.current?.();
       });
       map.events.add('moveend', () => {
@@ -957,19 +942,27 @@ export default function MapView({
         }
         vehicleMarkerRef.current = null;
       }
-      alertDsRef.current = null;
-      for (const marker of alertMarkersRef.current) {
+      if (destMarkerRef.current) {
+        try {
+          mapInstance.current?.markers.remove(destMarkerRef.current);
+        } catch {
+          /* ignore */
+        }
+        destMarkerRef.current = null;
+      }
+      alertMarkersRef.current = [];
+      for (const marker of fuelMarkersRef.current) {
         try {
           mapInstance.current?.markers.remove(marker);
         } catch {
           /* ignore */
         }
       }
-      alertMarkersRef.current = [];
+      fuelMarkersRef.current = [];
       atlasRef.current = null;
       mapInitRef.current = false;
     };
-  }, [pauseGpsFollow, retryToken]);
+  }, [pauseGpsFollow, retryToken, mapTheme]);
 
   useEffect(() => {
     if (!mapReady || mode !== 'idle' || hasIdleCenteredRef.current) return;
@@ -1048,13 +1041,15 @@ export default function MapView({
     if (recenterToken === 0) return;
     manualExploreLockRef.current = false;
     navFollowPauseUntilRef.current = 0;
+    navPitchEnabledRef.current = true;
     followRef.current = true;
     onFollowChangeRef.current?.(true);
     lastCameraRef.current = null;
+    lastFollowMsRef.current = 0;
+    lastNavBearingRef.current = null;
     routeRedrawRef.current?.(true);
-    applyNavCameraThrottled(true);
-    forceNavCameraRef.current(true, true, true);
-  }, [recenterToken, applyNavCameraThrottled]);
+    forceNavCameraRef.current(false, true, true);
+  }, [recenterToken]);
 
   const drawRouteLine = useCallback((force = false) => {
     const routeDs = routeDsRef.current;
@@ -1139,35 +1134,6 @@ export default function MapView({
   }, [drawAlternativeRoutes, mapReady, mode]);
 
   useEffect(() => {
-    if (!mapReady || mode !== 'preview' || !routePoints || routePoints.length < 2) return;
-    const map = mapInstance.current;
-    const atlas = atlasRef.current;
-    if (!map || !atlas) return;
-
-    const simplified = simplifyRoutePoints(routePoints, ROUTE_POINTS_PREVIEW_MAX, ROUTE_SIMPLIFY_MIN_KM).filter(
-      (p) => isValidCoord(p.lat, p.lon)
-    );
-    if (simplified.length < 2) return;
-
-    const positions = simplified.map((p) => [Number(p.lon), Number(p.lat)] as MapPosition);
-    markProgrammaticCamera();
-    try {
-      map.setCamera(
-        {
-          bounds: atlas.data.BoundingBox.fromPositions(positions),
-          padding: { top: 72, bottom: 220, left: 32, right: 32 },
-          maxZoom: ZOOM_PREVIEW_MAX,
-          minZoom: ZOOM_MIN_OVERVIEW,
-          ...NORTH_UP_CAMERA,
-        },
-        CAMERA_JUMP
-      );
-    } catch {
-      /* ignore invalid bounds */
-    }
-  }, [mapReady, mode, routePoints, selectedRouteId, markProgrammaticCamera]);
-
-  useEffect(() => {
     drawRouteLine();
 
     const atlas = atlasRef.current;
@@ -1239,14 +1205,16 @@ export default function MapView({
   useEffect(() => {
     if (!mapReady) return;
     drawRouteLine(true);
-  }, [mapReady, routeOverviewActive, followingGps, drawRouteLine]);
+  }, [mapReady, routeOverviewActive, followingGps, previewFitToken, drawRouteLine]);
 
   useEffect(() => {
     const map = mapInstance.current;
     if (!mapReadyRef.current || !map) return;
     const exploring = routeOverviewActive || !followingGps || mode !== 'navigate';
     try {
-      map.setCamera({ minZoom: exploring ? ZOOM_MIN_OVERVIEW : ZOOM_MIN_NAV });
+      // Nunca limitar o zoom máximo (isso quebrava a navegação ao arrastar/pinçar).
+      map.setMaxZoom?.(NAV_MAP_MAX_ZOOM);
+      map.setMinZoom?.(exploring ? ZOOM_MIN_OVERVIEW : Math.min(ZOOM_MIN_NAV, NAV_MAP_MIN_ZOOM));
     } catch {
       /* ignore */
     }
@@ -1264,17 +1232,21 @@ export default function MapView({
   }, [mapReady, mode, navigationStartToken]);
 
   useEffect(() => {
-    if (!mapReady || mode !== 'navigate' || !followingGps || routeOverviewActive) return;
+    if (!mapReady || mode !== 'navigate' || routeOverviewActive) return;
     const enforce = () => {
-      if (modeRef.current !== 'navigate' || !followRef.current || routeOverviewRef.current) return;
+      if (modeRef.current !== 'navigate' || routeOverviewRef.current) return;
       const map = mapInstance.current;
       if (!map) return;
+
+      // Enquanto o usuário arrasta/pinça: NÃO força câmera e NÃO volta sozinho ao follow.
+      // Só o botão Recentralizar reativa (estilo Waze).
+      if (!followRef.current || manualExploreLockRef.current) return;
+      if (Date.now() < navFollowPauseUntilRef.current) return;
+
       const cam = map.getCamera();
       const zoom = cam?.zoom ?? 0;
-      const pitch = cam?.pitch ?? 0;
-      if (zoom < ZOOM_NAV_MIN_ACTIVE - 0.5 || zoom > ZOOM_NAV_MAX + 0.4 || pitch < 20) {
-        manualExploreLockRef.current = false;
-        navFollowPauseUntilRef.current = 0;
+      // Se o zoom caiu demais (bug/macro), recupera a visão próxima.
+      if (zoom < ZOOM_NAV_MIN_ACTIVE - 0.8) {
         forceNavCameraRef.current(false, true, true);
       }
     };
@@ -1319,8 +1291,22 @@ export default function MapView({
 
   useEffect(() => {
     followRef.current = followingGps;
-    if (!followingGps) manualExploreLockRef.current = true;
-  }, [followingGps]);
+    if (followingGps || routeOverviewActive) {
+      if (followingGps) {
+        manualExploreLockRef.current = false;
+        navFollowPauseUntilRef.current = 0;
+      }
+    } else if (!routeOverviewRef.current) {
+      manualExploreLockRef.current = true;
+    }
+  }, [followingGps, routeOverviewActive]);
+
+  useEffect(() => {
+    if (!routeOverviewActive) return;
+    manualExploreLockRef.current = false;
+    navFollowPauseUntilRef.current = 0;
+    routeRedrawRef.current?.(true);
+  }, [routeOverviewActive, routeOverviewToken]);
 
   useEffect(() => {
     if (!mapReadyRef.current || mode !== 'navigate' || !followRef.current) return;
@@ -1382,14 +1368,26 @@ export default function MapView({
     }
     lastVehiclePosRef.current = { lat: focus.lat, lon: focus.lon };
 
+    // Em navegação o mapa gira: seta aponta “para cima” da tela (estilo Waze).
+    const html = vehicleMarkerHtml(heading, mode === 'navigate');
+    const pos: MapPosition = [Number(focus.lon), Number(focus.lat)];
+
     if (vehicleMarkerRef.current) {
-      map.markers.remove(vehicleMarkerRef.current);
+      const existing = vehicleMarkerRef.current as HtmlMarkerInstance & {
+        setLngLat?: (p: MapPosition) => void;
+        setHtmlContent?: (h: string) => void;
+      };
+      existing.setLngLat?.(pos);
+      existing.setHtmlContent?.(html);
+      return;
     }
+
     const marker = new atlas.HtmlMarker({
-      position: [Number(focus.lon), Number(focus.lat)],
-      htmlContent: vehicleMarkerHtml(heading, mode === 'navigate'),
+      position: pos,
+      htmlContent: html,
       anchor: 'center',
-      zIndex: 300,
+      zIndex: 600,
+      pitchAlignment: 'viewport',
     });
     map.markers.add(marker);
     vehicleMarkerRef.current = marker;
@@ -1431,13 +1429,31 @@ export default function MapView({
       nextManeuver.lat,
       nextManeuver.lon
     );
-    if (distKm < 0.04 || distKm > 2.5) {
+    // Só mostra a seta de curva à frente (nunca muito perto = “atrás” do puck).
+    if (distKm < 0.05 || distKm > 2.5) {
       clearTurnMarker();
       return;
     }
 
     const atlas = atlasRef.current;
     if (!atlas) return;
+
+    // Roda a seta no sentido da via (Waze: seta branca “em cima” da rota).
+    let approach = 0;
+    if (routePoints && routePoints.length >= 2) {
+      let bestI = 0;
+      let bestD = Infinity;
+      for (let i = 0; i < routePoints.length; i++) {
+        const d = haversineKm(nextManeuver.lat, nextManeuver.lon, routePoints[i].lat, routePoints[i].lon);
+        if (d < bestD) {
+          bestD = d;
+          bestI = i;
+        }
+      }
+      const from = routePoints[Math.max(0, bestI - 4)];
+      const to = routePoints[bestI];
+      approach = bearingDeg(from.lat, from.lon, to.lat, to.lon);
+    }
 
     if (turnMarkerRef.current) {
       map.markers.remove(turnMarkerRef.current);
@@ -1446,29 +1462,93 @@ export default function MapView({
       position: [Number(nextManeuver.lon), Number(nextManeuver.lat)],
       htmlContent: turnMapMarkerHtml(nextManeuver.instructionType, nextManeuver.message),
       anchor: 'center',
-      zIndex: 250,
+      zIndex: 450,
+      pitchAlignment: 'map',
+      rotationAlignment: 'map',
     });
     map.markers.add(marker);
+    (marker as HtmlMarkerInstance & { setRotation?: (d: number) => void }).setRotation?.(approach);
     turnMarkerRef.current = marker;
 
     return clearTurnMarker;
-  }, [mode, mapReady, nextManeuver, userPosition.lat, userPosition.lon]);
+  }, [mode, mapReady, nextManeuver, userPosition.lat, userPosition.lon, routePoints]);
 
   useEffect(() => {
-    const destDs = destDsRef.current;
+    const map = mapInstance.current;
     const atlas = atlasRef.current;
-    if (!mapReadyRef.current || !destDs || !atlas) return;
-    destDs.clear();
-    if (destination && mode === 'preview' && isValidCoord(destination.lat, destination.lon)) {
-      destDs.add(new atlas.data.Feature(new atlas.data.Point([destination.lon, destination.lat])));
+    if (!mapReadyRef.current || !map || !atlas) return;
+
+    const clearDest = () => {
+      if (destMarkerRef.current) {
+        try {
+          map.markers.remove(destMarkerRef.current);
+        } catch {
+          /* ignore */
+        }
+        destMarkerRef.current = null;
+      }
+      destDsRef.current?.clear();
+    };
+
+    const showDest =
+      destination &&
+      (mode === 'preview' || mode === 'navigate' || mode === 'idle') &&
+      isValidCoord(destination.lat, destination.lon);
+
+    if (!showDest) {
+      clearDest();
+      return;
     }
+
+    const pos: MapPosition = [Number(destination.lon), Number(destination.lat)];
+    if (destMarkerRef.current) {
+      const existing = destMarkerRef.current as HtmlMarkerInstance & {
+        setLngLat?: (p: MapPosition) => void;
+        setHtmlContent?: (h: string) => void;
+      };
+      existing.setLngLat?.(pos);
+      existing.setHtmlContent?.(destinationMarkerHtml());
+      return;
+    }
+
+    const marker = new atlas.HtmlMarker({
+      position: pos,
+      htmlContent: destinationMarkerHtml(),
+      anchor: 'bottom',
+      zIndex: 350,
+    });
+    map.markers.add(marker);
+    destMarkerRef.current = marker;
+
+    return clearDest;
   }, [destination, mode, mapReady]);
 
+  // Ficha de local: aproximar o pin sem estar em previsão de rota.
   useEffect(() => {
-    const alertDs = alertDsRef.current;
+    const map = mapInstance.current;
+    if (!mapReady || !map || mode !== 'idle' || !destination) return;
+    if (!isValidCoord(destination.lat, destination.lon)) return;
+    if (layoutKey !== 'place-detail') return;
+    markProgrammaticCamera();
+    try {
+      map.setCamera(
+        {
+          center: [Number(destination.lon), Number(destination.lat)],
+          zoom: ZOOM_HOME,
+          bearing: 0,
+          pitch: 0,
+        },
+        CAMERA_EASE
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [destination?.lat, destination?.lon, mode, mapReady, layoutKey, markProgrammaticCamera]);
+
+  useEffect(() => {
     const atlas = atlasRef.current;
     const map = mapInstance.current;
-    if (!mapReadyRef.current || !alertDs || !atlas || !map) return;
+    if (!mapReadyRef.current || !atlas || !map) return;
 
     const clearHtmlMarkers = () => {
       for (const marker of alertMarkersRef.current) {
@@ -1481,20 +1561,22 @@ export default function MapView({
       alertMarkersRef.current = [];
     };
 
-    alertDs.clear();
     clearHtmlMarkers();
 
     if (!roadAlerts?.length || (mode !== 'navigate' && mode !== 'preview')) return;
 
     const zoom = mapZoom ?? map.getCamera()?.zoom ?? null;
+    const mapFocus = mapCameraCenter(map) ?? userPosition;
     const visible = pickAlertsForMap(roadAlerts, mode, userPosition, routePoints, {
       zoom,
       routeOverview: routeOverviewActive,
-      followingGps,
-      map,
+      mapFocus,
+      visibleRadiusKm: visibleRadiusKmForZoom(zoom),
+      maxCount: ALERTS_MAX_PREVIEW,
     });
 
-    if (zoom != null && zoom < 11) return;
+    const showDetailIcons = zoom == null || zoom >= 9;
+    if (!showDetailIcons) return;
 
     for (const alert of visible) {
       if (!isMapAlertType(alert.type)) continue;
@@ -1519,6 +1601,59 @@ export default function MapView({
     followingGps,
     userPosition.lat,
     userPosition.lon,
+  ]);
+
+  useEffect(() => {
+    const atlas = atlasRef.current;
+    const map = mapInstance.current;
+    if (!mapReadyRef.current || !atlas || !map) return;
+
+    for (const marker of fuelMarkersRef.current) {
+      try {
+        map.markers.remove(marker);
+      } catch {
+        /* ignore */
+      }
+    }
+    fuelMarkersRef.current = [];
+
+    if (!fuelPois?.length || mode === 'idle') return;
+
+    const zoom = mapZoom ?? map.getCamera()?.zoom ?? null;
+    const visible = pickFuelPoisForMap(fuelPois, mode, userPosition, routePoints, {
+      routeOverview: routeOverviewActive,
+    });
+
+    for (const poi of visible) {
+      const marker = new atlas.HtmlMarker({
+        position: [Number(poi.lon), Number(poi.lat)],
+        htmlContent: fuelMarkerHtml(zoom, poi.name),
+        anchor: 'bottom',
+        zIndex: 850,
+      });
+      map.markers.add(marker);
+      const el = marker.getElement?.();
+      if (el && onFuelPoiClick) {
+        el.style.pointerEvents = 'auto';
+        el.style.cursor = 'pointer';
+        el.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          onFuelPoiClick(poi);
+        });
+      }
+      fuelMarkersRef.current.push(marker);
+    }
+  }, [
+    fuelPois,
+    mode,
+    mapReady,
+    mapZoom,
+    mapViewToken,
+    routePoints,
+    routeOverviewActive,
+    userPosition.lat,
+    userPosition.lon,
+    onFuelPoiClick,
   ]);
 
   return (

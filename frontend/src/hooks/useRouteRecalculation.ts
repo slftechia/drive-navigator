@@ -1,11 +1,12 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { planTrip, fetchTripPois, fetchRoadAlerts, type TripPlan, type VehicleConfig } from '../api';
-import { filterAlertsOnRoute, mergeRoadAlerts } from '../lib/roadAlerts';
+import { planTrip, fetchRoadAlerts, type TripPlan, type VehicleConfig } from '../api';
+import { mergeRoadAlerts, snapAlertsToRoute } from '../lib/roadAlerts';
 import { distanceToRouteKm, haversineKm, sliceRouteWindow } from '../utils/geo';
 
 const OFF_ROUTE_KM = 0.12;
 const OFF_ROUTE_CONFIRM_MS = 1600;
 const RECALC_COOLDOWN_MS = 7000;
+const RECALC_WATCHDOG_MS = 16_000;
 
 interface UseRouteRecalculationOptions {
   active: boolean;
@@ -55,6 +56,13 @@ export function useRouteRecalculation({
     lastRecalcMsRef.current = Date.now();
     offRouteSinceRef.current = null;
 
+    const watchdog = window.setTimeout(() => {
+      if (!inFlightRef.current) return;
+      inFlightRef.current = false;
+      setRecalculating(false);
+      onError('Recálculo demorou demais. Mantendo a rota atual.');
+    }, RECALC_WATCHDOG_MS);
+
     try {
       const remainingFuel = Math.max(0, vehicle.currentFuelKm - distanceTraveled);
       const result = await planTrip({
@@ -80,19 +88,13 @@ export function useRouteRecalculation({
 
       const pts = result.route.legs[0]?.points;
       if (pts?.length) {
-        void fetchTripPois({ routePoints: pts })
-          .then(({ pois }) => {
-            onTripUpdate({ ...result, pois });
-          })
-          .catch(() => undefined);
-
         const alertPts =
           result.route.totalDistanceKm > 100
             ? sliceRouteWindow(pts, position.lat, position.lon, 20, 70)
             : pts;
         void fetchRoadAlerts(alertPts)
           .then((roadAlerts) => {
-            const onRoute = filterAlertsOnRoute(roadAlerts, pts, 0.18);
+            const onRoute = snapAlertsToRoute(roadAlerts, pts, 0.12);
             if (onRoute.length > 0) {
               onTripUpdate({
                 ...result,
@@ -105,6 +107,7 @@ export function useRouteRecalculation({
     } catch {
       onError('Não foi possível recalcular a rota.');
     } finally {
+      window.clearTimeout(watchdog);
       inFlightRef.current = false;
       setRecalculating(false);
     }

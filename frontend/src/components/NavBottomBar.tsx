@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { formatDurationClock, formatEtaTime, formatNavDistanceKm } from '../lib/routeFormat';
+import type { TrafficLevel } from '../lib/trafficEstimate';
 
 interface NavBottomBarProps {
   arrivalTime: Date;
@@ -7,18 +8,23 @@ interface NavBottomBarProps {
   distanceRemainingKm: number;
   followingGps: boolean;
   routeOverview?: boolean;
+  trafficHint?: string | null;
+  trafficLevel?: TrafficLevel | null;
   onRecenter: () => void;
   onViewRoute: () => void;
   onOpenMenu: () => void;
   onEndNavigation: () => void;
 }
 
+/** Barra inferior estilo Waze: tempo · ETA · distância + Recentralizar. */
 export default function NavBottomBar({
   arrivalTime,
   durationRemainingMinutes,
   distanceRemainingKm,
   followingGps,
   routeOverview = false,
+  trafficHint = null,
+  trafficLevel = null,
   onRecenter,
   onViewRoute,
   onOpenMenu,
@@ -31,33 +37,46 @@ export default function NavBottomBar({
     return () => window.clearInterval(id);
   }, []);
 
-  let leftLabel = 'Ver rota';
-  let leftAction = onViewRoute;
-  if (routeOverview) {
-    leftLabel = 'Voltar';
-    leftAction = onRecenter;
-  } else if (!followingGps) {
-    leftLabel = 'Re-centralizar';
-    leftAction = onRecenter;
-  }
-
+  const needsRecenter = routeOverview || !followingGps;
   const eta = formatEtaTime(arrivalTime);
   const durationLabel = formatDurationClock(durationRemainingMinutes);
   const distanceLabel = formatNavDistanceKm(distanceRemainingKm);
 
   return (
     <div className="nav-bottom-bar">
-      <button type="button" className="nav-bottom-action" onClick={leftAction}>
-        {leftLabel}
-      </button>
-      <div className="nav-bottom-stats">
-        <div className="nav-bottom-eta">{eta}</div>
-        <div className="nav-bottom-sub">
-          <span>{durationLabel}</span>
-          <span className="nav-bottom-dot">·</span>
-          <span>{distanceLabel}</span>
-        </div>
+      {needsRecenter ? (
+        <button type="button" className="nav-recenter-btn" onClick={onRecenter}>
+          <span className="nav-recenter-icon" aria-hidden>
+            ◎
+          </span>
+          Recentralizar
+        </button>
+      ) : (
+        <button
+          type="button"
+          className="nav-bottom-icon-btn"
+          onClick={onViewRoute}
+          aria-label="Ver rota"
+        >
+          🔍
+        </button>
+      )}
+
+      <div className="nav-bottom-stats nav-bottom-stats-waze">
+        <span className="nav-bottom-chip">{durationLabel}</span>
+        <span className="nav-bottom-chip nav-bottom-chip-eta">{eta}</span>
+        <span className="nav-bottom-chip">{distanceLabel}</span>
+        {trafficHint && (
+          <span
+            className={`nav-bottom-chip nav-bottom-traffic${
+              trafficLevel ? ` traffic-${trafficLevel}` : ''
+            }`}
+          >
+            {trafficHint}
+          </span>
+        )}
       </div>
+
       <div className="nav-bottom-right">
         <button type="button" className="nav-bottom-end" onClick={onEndNavigation} aria-label="Encerrar navegação">
           ✕

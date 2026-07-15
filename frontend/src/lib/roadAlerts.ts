@@ -1,7 +1,8 @@
 import type { RoadAlert } from '../api';
-import { distanceToRouteKm, haversineKm } from '../utils/geo';
+import { distanceToRouteKm, haversineKm, routeProgressKm, snapPointToRoute } from '../utils/geo';
+import { hazardMarkerHtml, lombadaMarkerHtml, radarMarkerHtml } from './mapMarkers';
 
-export const MAP_ALERT_TYPES = ['radar', 'lombada'] as const;
+export const MAP_ALERT_TYPES = ['radar', 'lombada', 'perigo'] as const;
 export type MapAlertType = (typeof MAP_ALERT_TYPES)[number];
 
 export function isMapAlertType(type: string): type is MapAlertType {
@@ -29,14 +30,90 @@ export function mergeRoadAlerts(
   return Array.from(map.values());
 }
 
+/** Cola alertas na polyline para ícones ficarem sobre a rota. */
+export function snapAlertsToRoute(
+  alerts: RoadAlert[],
+  routePoints: Array<{ lat: number; lon: number }>,
+  maxDistKm = 0.35
+): RoadAlert[] {
+  if (routePoints.length < 2) return alerts;
+  const out: RoadAlert[] = [];
+  for (const a of alerts) {
+    const snap = snapPointToRoute(a, routePoints);
+    if (snap.distanceKm > maxDistKm) continue;
+    out.push({ ...a, lat: snap.lat, lon: snap.lon });
+  }
+  return out;
+}
+
 /** Mantém alertas colados à polyline da rota. */
 export function filterAlertsOnRoute(
   alerts: RoadAlert[],
   routePoints: Array<{ lat: number; lon: number }>,
-  maxDistKm = 0.16
+  maxDistKm = 0.35
 ): RoadAlert[] {
   if (routePoints.length < 2) return alerts;
   return alerts.filter((a) => distanceToRouteKm(a, routePoints) <= maxDistKm);
+}
+
+export interface PickMapAlertsOptions {
+  zoom?: number | null;
+  routeOverview?: boolean;
+  mapFocus?: { lat: number; lon: number } | null;
+  visibleRadiusKm?: number;
+  maxCount?: number;
+}
+
+/** Alertas visíveis no mapa (navegação / prévia). */
+export function pickAlertsForMap(
+  alerts: RoadAlert[] | undefined,
+  mode: 'idle' | 'preview' | 'navigate',
+  userPosition: { lat: number; lon: number },
+  routePoints: Array<{ lat: number; lon: number }> | undefined,
+  opts: PickMapAlertsOptions = {}
+): RoadAlert[] {
+  if (!alerts?.length || mode === 'idle') return [];
+
+  const { zoom = null, routeOverview = false, mapFocus = null, visibleRadiusKm = 18, maxCount = 180 } = opts;
+  let pool = filterMapAlerts(alerts).filter(
+    (a) => Number.isFinite(a.lat) && Number.isFinite(a.lon)
+  );
+  if (!pool.length) return [];
+
+  const snapKm = routeOverview ? 0.18 : 0.12;
+  if (routePoints && routePoints.length >= 2) {
+    pool = snapAlertsToRoute(pool, routePoints, snapKm);
+  }
+  if (!pool.length) return [];
+
+  const dedupeGap = dedupeGapForZoom(zoom);
+  const max =
+    mode === 'preview' || routeOverview
+      ? Math.min(maxCount, 80)
+      : Math.min(maxCount, Math.max(maxAlertsForZoom(zoom), 18));
+
+  if (mode === 'preview' || routeOverview) {
+    return dedupeAlertsNearby(pool, dedupeGap).slice(0, max);
+  }
+
+  if (mode === 'navigate' && routePoints && routePoints.length >= 2) {
+    const userSnap = snapPointToRoute(userPosition, routePoints);
+    const userKm = routeProgressKm(userSnap, routePoints);
+    const focus = mapFocus ?? userSnap;
+    const radiusKm = Math.min(Math.max(visibleRadiusKm, 2.5), 8);
+
+    pool = pool.filter((a) => {
+      const distFocus = haversineKm(focus.lat, focus.lon, a.lat, a.lon);
+      if (distFocus > radiusKm) return false;
+      const aKm = routeProgressKm(a, routePoints);
+      return aKm >= userKm - 0.4 && aKm <= userKm + 12;
+    });
+  } else if (mapFocus) {
+    const radiusKm = Math.min(visibleRadiusKm, routeOverview ? 40 : 10);
+    pool = pool.filter((a) => haversineKm(mapFocus.lat, mapFocus.lon, a.lat, a.lon) <= radiusKm);
+  }
+
+  return dedupeAlertsNearby(pool, dedupeGap).slice(0, max);
 }
 
 export function dedupeGapForZoom(zoom: number | null): number {
@@ -56,15 +133,18 @@ export function maxAlertsForZoom(zoom: number | null): number {
 }
 
 export function alertMarkerSizePx(zoom: number | null): number {
-  if (zoom == null || !Number.isFinite(zoom)) return 26;
-  if (zoom >= 18) return 32;
-  if (zoom >= 17) return 28;
-  if (zoom >= 16) return 24;
-  if (zoom >= 15) return 20;
-  if (zoom >= 14) return 16;
-  if (zoom >= 13) return 13;
-  if (zoom >= 12) return 10;
-  return 7;
+  if (zoom == null || !Number.isFinite(zoom)) return 30;
+  if (zoom >= 17) return 36;
+  if (zoom >= 15) return 30;
+  if (zoom >= 13) return 24;
+  return 20;
+}
+
+/** Ícones estilo Waze — HtmlMarker não herda CSS do app. */
+export function alertMarkerHtml(type: MapAlertType, zoom: number | null = null): string {
+  if (type === 'radar') return radarMarkerHtml(zoom);
+  if (type === 'lombada') return lombadaMarkerHtml(zoom);
+  return hazardMarkerHtml(zoom);
 }
 
 /** Evita pilha de ícones no mesmo trecho (OSM costuma repetir nós próximos). */
@@ -81,34 +161,50 @@ export function dedupeAlertsNearby(alerts: RoadAlert[], minGapKm: number): RoadA
   return kept;
 }
 
-/** Ícones com estilos inline — HtmlMarker do Azure Maps não herda CSS do app. */
-export function alertMarkerHtml(type: MapAlertType, zoom: number | null = null): string {
-  const px = alertMarkerSizePx(zoom);
-  const icon = Math.max(10, Math.round(px * 0.52));
-  const border = Math.max(1.5, px * 0.07);
-
-  if (type === 'radar') {
-    return `<div style="width:${px}px;height:${px}px;border-radius:50%;background:linear-gradient(180deg,#ff8c42,#e85d04);border:${border}px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;pointer-events:none" aria-label="Radar">
-      <svg width="${icon}" height="${icon}" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M9 8h6v2H9V8zm0 3h6v2H9v-2z" fill="white"/>
-        <path d="M12 4a8 8 0 0 0-8 8h2a6 6 0 1 1 6 6v2a8 8 0 0 0 0-16zm-1 14h2v2h-2v-2z" fill="white"/>
-        <circle cx="12" cy="12" r="3.5" stroke="white" stroke-width="1.5" fill="none"/>
-      </svg>
-    </div>`;
-  }
-
-  return `<div style="width:${px}px;height:${px}px;background:#facc15;border:${border}px solid #111;transform:rotate(45deg);box-shadow:0 2px 6px rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;pointer-events:none" aria-label="Lombada">
-    <svg width="${icon}" height="${icon}" viewBox="0 0 24 24" style="transform:rotate(-45deg)" xmlns="http://www.w3.org/2000/svg">
-      <path d="M3 14 H21" stroke="#111" stroke-width="2.2" stroke-linecap="round"/>
-      <path d="M7 14 Q12 6 17 14" fill="#111"/>
-    </svg>
-  </div>`;
-}
-
 export function alertTypeLabel(type: RoadAlert['type']): string {
   if (type === 'radar') return 'Radar';
   if (type === 'lombada') return 'Lombada';
+  if (type === 'perigo') return 'Perigo';
   return 'Alerta';
+}
+
+/** Próximo alerta à frente na rota (estilo faixa Waze). */
+export function findNextAlertAhead(
+  alerts: RoadAlert[] | undefined,
+  user: { lat: number; lon: number },
+  routePoints?: Array<{ lat: number; lon: number }>,
+  maxMeters = 500
+): { alert: RoadAlert; distanceMeters: number } | null {
+  const pool = filterMapAlerts(alerts);
+  if (!pool.length) return null;
+
+  if (routePoints && routePoints.length >= 2) {
+    const userKm = routeProgressKm(user, routePoints);
+    let best: RoadAlert | null = null;
+    let bestAhead = Infinity;
+    for (const a of pool) {
+      const aKm = routeProgressKm(a, routePoints);
+      const aheadKm = aKm - userKm;
+      if (aheadKm < 0.02 || aheadKm > maxMeters / 1000) continue;
+      if (aheadKm < bestAhead) {
+        bestAhead = aheadKm;
+        best = a;
+      }
+    }
+    if (best) return { alert: best, distanceMeters: bestAhead * 1000 };
+  }
+
+  let nearest: RoadAlert | null = null;
+  let nearestM = Infinity;
+  for (const a of pool) {
+    const m = haversineKm(user.lat, user.lon, a.lat, a.lon) * 1000;
+    if (m < 25 || m > maxMeters) continue;
+    if (m < nearestM) {
+      nearestM = m;
+      nearest = a;
+    }
+  }
+  return nearest ? { alert: nearest, distanceMeters: nearestM } : null;
 }
 
 export function alertTypeIcon(type: RoadAlert['type']): string {
