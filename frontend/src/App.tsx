@@ -216,6 +216,7 @@ export default function App() {
   const [placeOverlay, setPlaceOverlay] = useState(false);
   const [shareHint, setShareHint] = useState<string | null>(null);
   const [audioSheetOpen, setAudioSheetOpen] = useState(false);
+  const [audioSheetFocus, setAudioSheetFocus] = useState<'voice' | 'alerts' | 'music' | undefined>();
 
   const gpsActive = gpsState === 'active';
   const gpsLabel =
@@ -879,6 +880,49 @@ export default function App() {
                 <span className="home-search-icon">🔍</span>
                 <span className="home-search-label">Para onde?</span>
               </button>
+              <div className="home-tools-row" role="group" aria-label="Som, música e alertas">
+                <button
+                  type="button"
+                  className={`home-tool-btn${alertSounds.muted ? ' home-tool-btn-off' : ''}`}
+                  onClick={() => {
+                    const next = { ...alertSounds, muted: !alertSounds.muted };
+                    setAlertSounds(next);
+                    saveAlertSoundSettings(next);
+                    if (next.muted && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+                      window.speechSynthesis.cancel();
+                    }
+                  }}
+                  aria-pressed={!alertSounds.muted}
+                  aria-label={alertSounds.muted ? 'Som desligado — tocar para ligar' : 'Som ligado — tocar para silenciar'}
+                >
+                  <span aria-hidden>{alertSounds.muted ? '🔇' : '🔊'}</span>
+                  Som
+                </button>
+                <button
+                  type="button"
+                  className="home-tool-btn"
+                  onClick={() => {
+                    setAudioSheetFocus('music');
+                    setAudioSheetOpen(true);
+                  }}
+                  aria-label="Música e voz"
+                >
+                  <span aria-hidden>♪</span>
+                  Música
+                </button>
+                <button
+                  type="button"
+                  className="home-tool-btn"
+                  onClick={() => {
+                    setAudioSheetFocus('alerts');
+                    setAudioSheetOpen(true);
+                  }}
+                  aria-label="Alertas e vozes"
+                >
+                  <span aria-hidden>⚠</span>
+                  Alertas
+                </button>
+              </div>
               <div className="home-quick-row">
                 <button type="button" className="home-quick-btn" onClick={handleQuickHome}>
                   <span aria-hidden>🏠</span>
@@ -992,7 +1036,10 @@ export default function App() {
               type="button"
               className="nav-side-fab"
               aria-label="Opções de áudio"
-              onClick={() => setAudioSheetOpen(true)}
+              onClick={() => {
+                setAudioSheetFocus('voice');
+                setAudioSheetOpen(true);
+              }}
             >
               ⋯
             </button>
@@ -1239,7 +1286,11 @@ export default function App() {
           settings={alertSounds}
           onChange={setAlertSounds}
           onSave={() => saveAlertSoundSettings(alertSounds)}
-          onClose={() => setAudioSheetOpen(false)}
+          focusSection={audioSheetFocus}
+          onClose={() => {
+            setAudioSheetOpen(false);
+            setAudioSheetFocus(undefined);
+          }}
         />
       )}
 

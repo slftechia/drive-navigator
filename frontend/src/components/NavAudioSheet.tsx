@@ -10,6 +10,8 @@ interface NavAudioSheetProps {
   onChange: (s: AlertSoundSettings) => void;
   onSave: () => void;
   onClose: () => void;
+  /** Rola até a seção ao abrir (home: Música / Alertas). */
+  focusSection?: 'voice' | 'alerts' | 'music';
 }
 
 const MUSIC: Array<{ id: MusicAppId; label: string }> = [
@@ -19,15 +21,29 @@ const MUSIC: Array<{ id: MusicAppId; label: string }> = [
 ];
 
 /** Painel rápido de áudio na navegação (estilo Waze). */
-export default function NavAudioSheet({ settings, onChange, onSave, onClose }: NavAudioSheetProps) {
+export default function NavAudioSheet({
+  settings,
+  onChange,
+  onSave,
+  onClose,
+  focusSection,
+}: NavAudioSheetProps) {
   const [testingId, setTestingId] = useState<string | null>(null);
 
   useEffect(() => {
-    // Pré-carrega vozes do sistema (Android/iOS/desktop).
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.getVoices();
     }
   }, []);
+
+  useEffect(() => {
+    if (!focusSection) return;
+    const id = `nav-audio-${focusSection}`;
+    const t = window.setTimeout(() => {
+      document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
+    return () => window.clearTimeout(t);
+  }, [focusSection]);
 
   const setType = (type: RoadAlertType, on: boolean) => {
     onChange({
@@ -57,7 +73,9 @@ export default function NavAudioSheet({ settings, onChange, onSave, onClose }: N
             <span>Som ligado</span>
           </label>
 
-          <h3 className="nav-audio-section">Vozes</h3>
+          <h3 id="nav-audio-voice" className="nav-audio-section">
+            Vozes
+          </h3>
           <div className="voice-persona-list">
             {VOICE_PERSONAS.map((p) => {
               const active = settings.personaId === p.id;
@@ -123,7 +141,9 @@ export default function NavAudioSheet({ settings, onChange, onSave, onClose }: N
             <span>Alertas por voz</span>
           </label>
 
-          <h3 className="nav-audio-section">Alertas (comunidade)</h3>
+          <h3 id="nav-audio-alerts" className="nav-audio-section">
+            Alertas (comunidade)
+          </h3>
           <label className="toggle-row">
             <input
               type="checkbox"
@@ -147,7 +167,9 @@ export default function NavAudioSheet({ settings, onChange, onSave, onClose }: N
             </label>
           ))}
 
-          <h3 className="nav-audio-section">Música</h3>
+          <h3 id="nav-audio-music" className="nav-audio-section">
+            Música
+          </h3>
           <div className="nav-audio-music-row">
             {MUSIC.map((m) => (
               <button
