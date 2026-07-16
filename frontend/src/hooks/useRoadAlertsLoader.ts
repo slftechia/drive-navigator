@@ -33,7 +33,7 @@ export function useRoadAlertsLoader({
     if (!incoming.length) return;
     const pts = routePointsRef.current;
     const snapped =
-      pts && pts.length >= 2 ? snapAlertsToRoute(incoming, pts, 0.12) : incoming;
+      pts && pts.length >= 2 ? snapAlertsToRoute(incoming, pts, 0.28) : incoming;
     if (!snapped.length) return;
     onAlertsRef.current((prev) => {
       if (!prev) return prev;
@@ -71,12 +71,12 @@ export function useRoadAlertsLoader({
       if (!pts?.length) return;
       const { lat, lon } = positionRef.current;
       const progressKm = routeProgressKm({ lat, lon }, pts);
-      if (Math.abs(progressKm - lastFetchKmRef.current) < 4) return;
+      if (Math.abs(progressKm - lastFetchKmRef.current) < 1.5) return;
       lastFetchKmRef.current = progressKm;
       fetchWindow();
     };
 
-    const id = window.setInterval(tick, 12_000);
+    const id = window.setInterval(tick, 8_000);
     return () => window.clearInterval(id);
   }, [active, routePoints, navigationStartToken]);
 }

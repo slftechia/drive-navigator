@@ -91,7 +91,7 @@ export function pickAlertsForMap(
   );
   if (!pool.length) return [];
 
-  const snapKm = routeOverview ? 0.18 : 0.12;
+  const snapKm = routeOverview ? 0.3 : 0.28;
   if (routePoints && routePoints.length >= 2) {
     pool = snapAlertsToRoute(pool, routePoints, snapKm);
   }

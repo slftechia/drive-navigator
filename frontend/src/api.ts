@@ -264,7 +264,7 @@ export async function fetchRoadAlerts(routePoints: RoutePoint[]): Promise<RoadAl
   const { fetchRoadAlertsDirect } = await import('./lib/roadAlertsDirect');
   const { snapAlertsToRoute } = await import('./lib/roadAlerts');
   const alerts = await fetchRoadAlertsDirect(routePoints);
-  return snapAlertsToRoute(alerts, routePoints, 0.12);
+  return snapAlertsToRoute(alerts, routePoints, 0.28);
 }
 
 export async function fetchRoadAlertsNear(lat: number, lon: number, radiusM = 3500): Promise<RoadAlert[]> {
@@ -463,7 +463,8 @@ export function watchPosition(
 ): number {
   return navigator.geolocation.watchPosition(onUpdate, onError, {
     enableHighAccuracy: true,
-    maximumAge: 5_000,
+    maximumAge: 1_000,
+    timeout: 15_000,
   });
 }
 

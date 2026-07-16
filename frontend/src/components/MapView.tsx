@@ -78,8 +78,8 @@ const ROUTE_SIMPLIFY_MIN_KM = 0.018;
 const ROUTE_SIMPLIFY_OVERVIEW_KM = 0.004;
 const ROUTE_POINTS_OVERVIEW_LINE = 8000;
 const ALERTS_MAX_PREVIEW = 180;
-const FOLLOW_MIN_INTERVAL_MS = 500;
-const FOLLOW_MIN_MOVE_KM = 0.008;
+const FOLLOW_MIN_INTERVAL_MS = 350;
+const FOLLOW_MIN_MOVE_KM = 0.003;
 const HEADING_CAMERA_MIN_DEG = 2.5;
 const ROUTE_LOOKAHEAD_KM = 0.09;
 const GPS_HEADING_MIN_SPEED_MPS = 0.8;
@@ -343,11 +343,15 @@ function resolveNavHeading(
   const routeHeading =
     routePoints && routePoints.length >= 2 ? headingFromRoute(routePoints, focus) : null;
 
+  // Preferir rumo da rota se o compass GPS divergir muito (comum em baixa velocidade / urbano).
   if (
     userHeading != null &&
     !Number.isNaN(userHeading) &&
     (userSpeedMps ?? 0) >= GPS_HEADING_MIN_SPEED_MPS
   ) {
+    if (routeHeading != null && headingDeltaDeg(userHeading, routeHeading) > 40) {
+      return routeHeading;
+    }
     return userHeading;
   }
   if (routeHeading != null) return routeHeading;
@@ -466,10 +470,14 @@ export default function MapView({
   onFollowChangeRef.current = onFollowChange;
   modeRef.current = mode;
 
-  const markProgrammaticCamera = useCallback((holdMs = NAV_CAMERA_EASE_MS + 200) => {
+  const programmaticTokenRef = useRef(0);
+  const markProgrammaticCamera = useCallback((holdMs = NAV_CAMERA_EASE_MS + 700) => {
     programmaticCameraRef.current = true;
+    const token = ++programmaticTokenRef.current;
     window.setTimeout(() => {
-      programmaticCameraRef.current = false;
+      if (token === programmaticTokenRef.current) {
+        programmaticCameraRef.current = false;
+      }
     }, holdMs);
   }, []);
 
@@ -842,20 +850,19 @@ export default function MapView({
       map.layers.add(baseLayers);
 
       map.setUserInteraction(MAP_INTERACTION);
+      // Só gesto do usuário pausa o follow. NÃO usar movestart/rotatestart:
+      // a câmera de navegação (easeTo) dispara esses eventos e travava o GPS.
       map.events.add('dragstart', () => {
-        if (!programmaticCameraRef.current) pauseGpsFollow();
-      });
-      map.events.add('movestart', () => {
         if (!programmaticCameraRef.current) pauseGpsFollow();
       });
       map.events.add('dragend', () => {
         interactionEndRedrawRef.current?.();
       });
       map.events.add('zoomstart', () => {
-        if (!programmaticCameraRef.current) pauseGpsFollow(true);
-      });
-      map.events.add('rotatestart', () => {
-        if (!programmaticCameraRef.current) pauseGpsFollow();
+        if (programmaticCameraRef.current) return;
+        // easeTo da câmera de nav também dispara zoomstart — não tratar como pinça.
+        if (typeof map.isEasing === 'function' && map.isEasing()) return;
+        pauseGpsFollow(true);
       });
       const refreshMapView = () => {
         const z = map.getCamera()?.zoom;
@@ -1368,8 +1375,15 @@ export default function MapView({
     }
     lastVehiclePosRef.current = { lat: focus.lat, lon: focus.lon };
 
-    // Em navegação o mapa gira: seta aponta “para cima” da tela (estilo Waze).
-    const html = vehicleMarkerHtml(heading, mode === 'navigate');
+    // Rotação relativa ao mapa: seta sempre alinhada ao rumo geográfico na tela,
+    // mesmo se o follow estiver pausado (mapa north-up / arrastado).
+    const mapBearing = map.getCamera()?.bearing ?? 0;
+    const absHeading = heading ?? 0;
+    const screenRot =
+      mode === 'navigate'
+        ? (((absHeading - mapBearing) % 360) + 360) % 360
+        : absHeading;
+    const html = vehicleMarkerHtml(screenRot, false);
     const pos: MapPosition = [Number(focus.lon), Number(focus.lat)];
 
     if (vehicleMarkerRef.current) {
@@ -1401,6 +1415,7 @@ export default function MapView({
     routePoints,
     routeOrigin?.lat,
     routeOrigin?.lon,
+    mapViewToken,
   ]);
 
   useEffect(() => {

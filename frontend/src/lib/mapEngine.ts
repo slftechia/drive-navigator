@@ -421,6 +421,15 @@ class AtlasMap {
     this.map.resize();
   }
 
+  /** True enquanto easeTo/flyTo está animando (não confundir com gesto do usuário). */
+  isEasing(): boolean {
+    try {
+      return Boolean(this.map.isEasing?.());
+    } catch {
+      return false;
+    }
+  }
+
   dispose() {
     for (const marker of this.markerRegistry) marker.detach();
     this.markerRegistry.clear();

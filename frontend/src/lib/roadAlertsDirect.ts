@@ -1,14 +1,20 @@
 import type { RoadAlert } from '../api';
 import { haversineKm } from '../utils/geo';
 import { snapAlertsToRoute } from './roadAlerts';
+
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
 ];
-const RADIUS_M = 450;
+/** Raio por amostra — deve cobrir o intervalo entre samples com folga. */
+const RADIUS_M = 1400;
+/** Espaçamento alvo entre amostras ao longo da rota (~1 km → overlap com raio 1.4 km). */
+const SAMPLE_EVERY_KM = 1.0;
 const BATCH_SIZE = 3;
-const MAX_SAMPLES = 64;
+const MAX_SAMPLES = 80;
 const PARALLEL_BATCHES = 3;
+/** Lombadas OSM costumam ficar um pouco ao lado da polyline OSRM. */
+const SNAP_MAX_KM = 0.28;
 
 type OsmElement = {
   id: number;
@@ -26,16 +32,32 @@ function routeLengthKm(points: Array<{ lat: number; lon: number }>): number {
   return km;
 }
 
-function sampleAlongRoute(
+/** Amostra por distância ao longo da rota (não por índice de ponto). */
+function sampleAlongRouteByDistance(
   routePoints: Array<{ lat: number; lon: number }>,
+  everyKm: number,
   maxSamples: number
 ): Array<{ lat: number; lon: number }> {
-  if (routePoints.length <= maxSamples) return routePoints;
-  const result: Array<{ lat: number; lon: number }> = [];
-  const step = (routePoints.length - 1) / (maxSamples - 1);
-  for (let i = 0; i < maxSamples; i++) {
-    result.push(routePoints[Math.min(Math.round(i * step), routePoints.length - 1)]);
+  if (routePoints.length < 2) return routePoints.slice();
+  const result: Array<{ lat: number; lon: number }> = [routePoints[0]];
+  let acc = 0;
+  let nextAt = everyKm;
+  for (let i = 1; i < routePoints.length; i++) {
+    const seg = haversineKm(
+      routePoints[i - 1].lat,
+      routePoints[i - 1].lon,
+      routePoints[i].lat,
+      routePoints[i].lon
+    );
+    acc += seg;
+    while (acc >= nextAt && result.length < maxSamples - 1) {
+      result.push(routePoints[i]);
+      nextAt += everyKm;
+    }
   }
+  const last = routePoints[routePoints.length - 1];
+  const prev = result[result.length - 1];
+  if (prev.lat !== last.lat || prev.lon !== last.lon) result.push(last);
   return result;
 }
 
@@ -51,8 +73,12 @@ function buildOverpassQuery(samples: Array<{ lat: number; lon: number }>): strin
     clauses.push(`node(around:${RADIUS_M},${lat},${lon})["traffic_enforcement"];`);
     clauses.push(`node(around:${RADIUS_M},${lat},${lon})["traffic_calming"];`);
     clauses.push(`way(around:${RADIUS_M},${lat},${lon})["traffic_calming"];`);
-    clauses.push(`node(around:${RADIUS_M},${lat},${lon})["man_made"="surveillance"]["surveillance:type"="speed"];`);
-    clauses.push(`node(around:${RADIUS_M},${lat},${lon})["man_made"="surveillance"]["surveillance:type"="camera"];`);
+    clauses.push(
+      `node(around:${RADIUS_M},${lat},${lon})["man_made"="surveillance"]["surveillance:type"="speed"];`
+    );
+    clauses.push(
+      `node(around:${RADIUS_M},${lat},${lon})["man_made"="surveillance"]["surveillance:type"="camera"];`
+    );
   }
   return `[out:json][timeout:25];(\n  ${clauses.join('\n  ')}\n);\nout center tags;`;
 }
@@ -124,8 +150,8 @@ export async function fetchRoadAlertsDirect(
   if (routePoints.length < 2) return [];
 
   const km = routeLengthKm(routePoints);
-  const sampleCount = Math.min(MAX_SAMPLES, Math.max(18, Math.ceil(km / 6)));
-  const samples = sampleAlongRoute(routePoints, sampleCount);
+  const sampleCount = Math.min(MAX_SAMPLES, Math.max(8, Math.ceil(km / SAMPLE_EVERY_KM) + 1));
+  const samples = sampleAlongRouteByDistance(routePoints, SAMPLE_EVERY_KM, sampleCount);
 
   const batches: Array<Array<{ lat: number; lon: number }>> = [];
   for (let i = 0; i < samples.length; i += BATCH_SIZE) {
@@ -148,5 +174,5 @@ export async function fetchRoadAlertsDirect(
     if (alerts.length >= 280) break;
   }
 
-  return snapAlertsToRoute(alerts.slice(0, 320), routePoints, 0.12);
+  return snapAlertsToRoute(alerts.slice(0, 320), routePoints, SNAP_MAX_KM);
 }

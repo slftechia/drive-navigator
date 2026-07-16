@@ -613,14 +613,6 @@ export default function App() {
     });
   };
 
-  const stopNavigation = useCallback(() => {
-    setArrived(false);
-    setScreen('route-preview');
-    setRoutePreviewMinimized(false);
-    setFollowingGps(true);
-    setRouteOverview(false);
-  }, []);
-
   const goHome = useCallback(() => {
     setArrived(false);
     setScreen('home');
@@ -630,13 +622,19 @@ export default function App() {
     setPlaceOverlay(false);
     setFollowingGps(true);
     setRouteOverview(false);
+    setRoutePreviewMinimized(false);
   }, []);
+
+  /** Encerrar de verdade: limpa a viagem (não volta à prévia com countdown que reinicia). */
+  const stopNavigation = useCallback(() => {
+    goHome();
+  }, [goHome]);
 
   const endNavigation = useCallback(() => {
     if (window.confirm('Encerrar a navegação?')) {
-      stopNavigation();
+      goHome();
     }
-  }, [stopNavigation]);
+  }, [goHome]);
 
   const handleRecenter = () => {
     setRouteOverview(false);
