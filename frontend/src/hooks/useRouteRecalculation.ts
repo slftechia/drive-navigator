@@ -94,7 +94,7 @@ export function useRouteRecalculation({
             : pts;
         void fetchRoadAlerts(alertPts)
           .then((roadAlerts) => {
-            const onRoute = snapAlertsToRoute(roadAlerts, pts, 0.14);
+            const onRoute = snapAlertsToRoute(roadAlerts, pts, 0.28);
             if (onRoute.length > 0) {
               onTripUpdate({
                 ...result,

@@ -4,7 +4,7 @@ import App from './App';
 import './index.css';
 
 /** Muda a cada release — limpa cache do PWA instalado. */
-const BUILD_ID = '2026-07-16-lombada-cleanup-v1';
+const BUILD_ID = '2026-07-16-alerts-zoom-waze-v1';
 
 async function ensureFreshBuild() {
   try {

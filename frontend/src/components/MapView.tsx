@@ -222,13 +222,14 @@ function mapCameraCenter(map: MapInstance | null): { lat: number; lon: number } 
 }
 
 function visibleRadiusKmForZoom(zoom: number | null): number {
-  if (zoom == null || !Number.isFinite(zoom)) return 8;
-  if (zoom >= 17) return 3.5;
-  if (zoom >= 16) return 5;
-  if (zoom >= 15) return 7;
-  if (zoom >= 14) return 9;
-  if (zoom >= 12) return 12;
-  return 16;
+  if (zoom == null || !Number.isFinite(zoom)) return 10;
+  if (zoom >= 17) return 4;
+  if (zoom >= 16) return 6;
+  if (zoom >= 15) return 8;
+  if (zoom >= 14) return 11;
+  if (zoom >= 12) return 15;
+  if (zoom >= 10) return 20;
+  return 28;
 }
 
 const NORTH_UP_CAMERA = { bearing: 0, pitch: 0 } as const;
@@ -1609,10 +1610,7 @@ export default function MapView({
       },
     });
 
-    // Em navegação sempre mostra lombadas/radares; só esconde em zoom muito afastado.
-    const showDetailIcons = mode === 'navigate' || zoom == null || zoom >= 8;
-    if (!showDetailIcons) return;
-
+    // Sempre desenha em navegação/prévia (Waze: zoom +/- continua vendo os ícones).
     const laidOut = layoutAlertMarkers(visible, routePoints ?? [], nextManeuver);
 
     for (const { alert, lat, lon } of laidOut) {
@@ -1622,7 +1620,7 @@ export default function MapView({
         position: [Number(lon), Number(lat)],
         htmlContent: alertMarkerHtml(alert.type, zoom),
         anchor: 'center',
-        zIndex: 480,
+        zIndex: 520,
         pitchAlignment: 'viewport',
       });
       map.markers.add(marker);
