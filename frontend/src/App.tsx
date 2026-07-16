@@ -561,6 +561,25 @@ export default function App() {
     if (screen === 'home') setHomeRecents(loadRecentSearches().slice(0, 3));
   }, [screen]);
 
+  const notifyShareResult = useCallback((result: 'shared' | 'copied' | 'failed') => {
+    if (result === 'shared') setShareHint('Compartilhado');
+    else if (result === 'copied') setShareHint('Link copiado — cole no WhatsApp');
+    else setShareHint('Não foi possível compartilhar');
+    window.setTimeout(() => setShareHint(null), 2800);
+  }, []);
+
+  const shareCurrentDestination = useCallback(() => {
+    const dest = placeDetail ?? (trip ? selectedDest : null);
+    const lat = dest?.lat;
+    const lon = dest?.lon;
+    if (lat == null || lon == null) return;
+    void shareDestination({
+      lat,
+      lon,
+      label: dest.placeName || dest.locationTag || dest.label,
+    }).then(notifyShareResult);
+  }, [placeDetail, trip, selectedDest, notifyShareResult]);
+
   const handleRouteChoice = (mode: RouteMode) => {
     if (mode === 'navigate') {
       unlockAlertAudio();
@@ -1173,19 +1192,7 @@ export default function App() {
           }}
           favoriteSaved={placeFavSaved}
           shareHint={shareHint}
-          onShare={() => {
-            if (placeDetail.lat == null || placeDetail.lon == null) return;
-            void shareDestination({
-              lat: placeDetail.lat,
-              lon: placeDetail.lon,
-              label: placeDetail.placeName || placeDetail.label,
-            }).then((result) => {
-              if (result === 'shared') setShareHint('Compartilhado');
-              else if (result === 'copied') setShareHint('Link copiado');
-              else setShareHint('Não foi possível compartilhar');
-              window.setTimeout(() => setShareHint(null), 2200);
-            });
-          }}
+          onShare={shareCurrentDestination}
         />
       )}
 
@@ -1198,6 +1205,8 @@ export default function App() {
           originLabel={originLabel}
           onChoose={handleRouteChoice}
           onBack={goHome}
+          shareHint={shareHint}
+          onShare={shareCurrentDestination}
         />
       )}
 

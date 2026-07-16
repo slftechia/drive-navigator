@@ -59,6 +59,30 @@ export function clearDestinationShareParams(): void {
   }
 }
 
+async function copyLink(link: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(link);
+    return true;
+  } catch {
+    /* fallback abaixo */
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = link;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Compartilha link do destino/rota (abre o app no local). */
 export async function shareDestination(place: {
   lat: number;
   lon: number;
@@ -66,19 +90,18 @@ export async function shareDestination(place: {
 }): Promise<'shared' | 'copied' | 'failed'> {
   const link = buildDestinationShareUrl(place);
   const title = 'Drive Navigator';
-  const text = `Navegar até ${place.label}`;
+  // WhatsApp e apps semelhantes costumam ignorar `url` — o link vai no texto.
+  const text = `Rota no Drive Navigator:\n${place.label}\n${link}`;
+
   try {
-    if (navigator.share) {
+    if (typeof navigator.share === 'function') {
       await navigator.share({ title, text, url: link });
       return 'shared';
     }
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') return 'failed';
   }
-  try {
-    await navigator.clipboard.writeText(link);
-    return 'copied';
-  } catch {
-    return 'failed';
-  }
+
+  const copied = await copyLink(link);
+  return copied ? 'copied' : 'failed';
 }

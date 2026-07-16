@@ -19,6 +19,8 @@ interface RoutePreviewSheetProps {
   onChoose: (mode: RouteMode) => void;
   onBack: () => void;
   countdownSeconds?: number;
+  onShare?: () => void;
+  shareHint?: string | null;
 }
 
 function routeViaLabel(alt: RouteAlternative): string {
@@ -55,6 +57,8 @@ export default function RoutePreviewSheet({
   onChoose,
   onBack,
   countdownSeconds = 10,
+  onShare,
+  shareHint = null,
 }: RoutePreviewSheetProps) {
   const [seconds, setSeconds] = useState(countdownSeconds);
   const chosenRef = useRef(false);
@@ -105,7 +109,13 @@ export default function RoutePreviewSheet({
         <div className="route-preview-dest">
           <strong>{destLabel}</strong>
         </div>
+        {onShare && (
+          <button type="button" className="route-preview-share" onClick={onShare}>
+            Compartilhar
+          </button>
+        )}
       </div>
+      {shareHint && <p className="route-preview-share-hint">{shareHint}</p>}
 
       {alternatives.length > 1 && (
         <div className="route-alt-chips" role="listbox" aria-label="Rotas disponíveis">

@@ -204,11 +204,25 @@
   right: 0;
   bottom: 0;
   z-index: 40;
-  padding: 0.65rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  max-height: min(72dvh, 560px);
+  padding: 0.65rem 1rem 0;
+  padding-bottom: 0;
   background: var(--panel, #fff);
   border-radius: 18px 18px 0 0;
   box-shadow: 0 -8px 28px rgba(15, 23, 42, 0.22);
   color: var(--text);
+  /* Android: safe-area costuma ser 0 — reserva espaço da barra de navegação do sistema. */
+  padding-bottom: max(3.25rem, calc(1.15rem + env(safe-area-inset-bottom, 0px)));
+}
+
+.place-detail-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 0.1rem;
 }
 
 .place-detail-top {
@@ -216,6 +230,7 @@
   align-items: center;
   gap: 0.5rem;
   margin-bottom: 0.55rem;
+  flex-shrink: 0;
 }
 
 .place-detail-share {
@@ -245,7 +260,7 @@
   display: flex;
   gap: 0.75rem;
   align-items: flex-start;
-  margin-bottom: 0.95rem;
+  margin-bottom: 0.75rem;
 }
 
 .place-detail-emoji {
@@ -286,6 +301,9 @@
 .place-detail-actions {
   display: flex;
   gap: 0.55rem;
+  flex-shrink: 0;
+  padding-top: 0.35rem;
+  margin-top: 0.15rem;
 }
 
 .place-detail-btn-fav,
@@ -735,7 +753,8 @@ html[data-theme='night'] .place-detail-btn-go {
   z-index: 1200;
   background: var(--sheet-bg);
   border-radius: 22px 22px 0 0;
-  padding: 0.85rem 1rem calc(1rem + env(safe-area-inset-bottom, 12px));
+  padding: 0.85rem 1rem;
+  padding-bottom: max(3.25rem, calc(1.15rem + env(safe-area-inset-bottom, 0px)));
   box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.45);
 }
 
@@ -744,6 +763,25 @@ html[data-theme='night'] .place-detail-btn-go {
   align-items: center;
   gap: 0.65rem;
   margin-bottom: 0.75rem;
+}
+
+.route-preview-share {
+  margin-left: auto;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--accent, #2563eb);
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0.25rem 0.15rem;
+}
+
+.route-preview-share-hint {
+  margin: -0.35rem 0 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #16a34a;
 }
 
 .route-preview-back {

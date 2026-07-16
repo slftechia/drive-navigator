@@ -70,15 +70,17 @@ export default function PlaceDetailSheet({
         )}
       </div>
 
-      <div className="place-detail-hero">
-        <span className="place-detail-emoji" aria-hidden>
-          {kindEmoji(place.resultKind)}
-        </span>
-        <div className="place-detail-copy">
-          <h2>{title}</h2>
-          <p>{subtitle}</p>
-          {dist && <em>{dist} de você</em>}
-          {shareHint && <em className="place-share-hint">{shareHint}</em>}
+      <div className="place-detail-body">
+        <div className="place-detail-hero">
+          <span className="place-detail-emoji" aria-hidden>
+            {kindEmoji(place.resultKind)}
+          </span>
+          <div className="place-detail-copy">
+            <h2>{title}</h2>
+            <p>{subtitle}</p>
+            {dist && <em>{dist} de você</em>}
+            {shareHint && <em className="place-share-hint">{shareHint}</em>}
+          </div>
         </div>
       </div>
 
