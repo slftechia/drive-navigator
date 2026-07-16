@@ -277,6 +277,7 @@ export function pickAlertsForMap(
     // Filtra pela posição NA ROTA (não pela coord OSM crua — ela pode estar fora da tela).
     pool = pool.filter((a) => {
       const onRoute = alertMapPosition(a, routePoints);
+      if (!onRoute) return false;
       if (haversineKm(focus.lat, focus.lon, onRoute.lat, onRoute.lon) > radiusKm) return false;
       if (exploring) return true;
       const aKm = alertRouteProgressKm(a, routePoints);
@@ -285,8 +286,11 @@ export function pickAlertsForMap(
   } else if (mapFocus) {
     const radiusKm = Math.min(visibleRadiusKm, routeOverview ? 40 : 12);
     pool = pool.filter((a) => {
-      const onRoute =
-        routePoints && routePoints.length >= 2 ? alertMapPosition(a, routePoints) : a;
+      if (!routePoints || routePoints.length < 2) {
+        return haversineKm(mapFocus.lat, mapFocus.lon, a.lat, a.lon) <= radiusKm;
+      }
+      const onRoute = alertMapPosition(a, routePoints);
+      if (!onRoute) return false;
       return haversineKm(mapFocus.lat, mapFocus.lon, onRoute.lat, onRoute.lon) <= radiusKm;
     });
   }
