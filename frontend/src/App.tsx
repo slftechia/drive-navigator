@@ -1099,6 +1099,7 @@ export default function App() {
           <NavAlertBanner
             alert={nextRoadAlert.alert}
             distanceMeters={nextRoadAlert.distanceMeters}
+            count={nextRoadAlert.count}
           />
         )}
 

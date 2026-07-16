@@ -4,6 +4,7 @@ import { alertTypeLabel } from '../lib/roadAlerts';
 interface NavAlertBannerProps {
   alert: RoadAlert | null;
   distanceMeters: number;
+  count?: number;
 }
 
 function formatAhead(meters: number): string {
@@ -32,12 +33,21 @@ function iconFor(type: RoadAlert['type']): string {
   return '⚠';
 }
 
-/** Faixa “Lombadas em 80 m” estilo Waze. */
-export default function NavAlertBanner({ alert, distanceMeters }: NavAlertBannerProps) {
+/** Faixa “Lombada em 80 m” / “3 lombadas em 150 m” estilo Waze. */
+export default function NavAlertBanner({ alert, distanceMeters, count = 1 }: NavAlertBannerProps) {
   if (!alert || distanceMeters <= 0 || distanceMeters > 500) return null;
 
+  const n = Math.max(1, count);
   const label =
-    alert.type === 'lombada' ? 'Lombadas' : alert.type === 'perigo' ? 'Perigo' : `${alertTypeLabel(alert.type)}`;
+    alert.type === 'lombada'
+      ? n > 1
+        ? `${n} lombadas`
+        : 'Lombada'
+      : alert.type === 'perigo'
+        ? 'Perigo'
+        : n > 1
+          ? `${n}× ${alertTypeLabel(alert.type)}`
+          : alertTypeLabel(alert.type);
   const ahead = formatAhead(distanceMeters);
 
   return (

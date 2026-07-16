@@ -1,5 +1,5 @@
 import type { RoadAlert } from '../api';
-import { distanceToRouteKm, haversineKm, pointAtRouteKm, routeProgressKm, snapPointToRoute } from '../utils/geo';
+import { distanceToRouteKm, haversineKm, routeProgressKm, snapPointToRoute } from '../utils/geo';
 import {
   ALL_ALERT_TYPES,
   ALERT_TYPE_META,
@@ -41,51 +41,32 @@ export function mergeRoadAlerts(
   return Array.from(map.values());
 }
 
-/** Cola alertas na polyline para ícones ficarem sobre a rota.
- *  Perto da via (<50 m): mantém coords OSM (evita colar lombada na esquina/seta).
- *  Mais longe: projeta na rota para não flutuar no quarteirão. */
+/** Progresso do alerta na rota (projeta só para cálculo; não muda o ícone no mapa). */
+export function alertRouteProgressKm(
+  alert: { lat: number; lon: number },
+  routePoints: Array<{ lat: number; lon: number }>
+): number {
+  const snap = snapPointToRoute(alert, routePoints, true);
+  return routeProgressKm(snap, routePoints);
+}
+
+/**
+ * Filtra alertas que estão perto da rota.
+ * Mantém sempre as coordenadas OSM — nunca cola na esquina/seta de curva.
+ */
 export function snapAlertsToRoute(
   alerts: RoadAlert[],
   routePoints: Array<{ lat: number; lon: number }>,
   maxDistKm = 0.35
 ): RoadAlert[] {
   if (routePoints.length < 2) return alerts;
-  const KEEP_OSM_KM = 0.05;
-  const out: RoadAlert[] = [];
-  for (const a of alerts) {
+  return alerts.filter((a) => {
     const snap = snapPointToRoute(a, routePoints, true);
-    if (snap.distanceKm > maxDistKm) continue;
-    if (snap.distanceKm <= KEEP_OSM_KM) {
-      out.push(a);
-    } else {
-      out.push({ ...a, lat: snap.lat, lon: snap.lon });
-    }
-  }
-  return out;
+    return snap.distanceKm <= maxDistKm;
+  });
 }
 
-/** Afasta ícone de alerta se estiver em cima da seta de manobra. */
-export function offsetAlertFromManeuver(
-  alert: RoadAlert,
-  maneuver: { lat: number; lon: number } | null | undefined,
-  routePoints: Array<{ lat: number; lon: number }> | undefined,
-  minGapKm = 0.038
-): RoadAlert {
-  if (!maneuver || !routePoints || routePoints.length < 2) return alert;
-  const d = haversineKm(alert.lat, alert.lon, maneuver.lat, maneuver.lon);
-  if (d >= minGapKm) return alert;
-
-  const alertKm = routeProgressKm(alert, routePoints);
-  const turnKm = routeProgressKm(maneuver, routePoints);
-  // Empurra o alerta ao longo da rota, para o lado oposto à curva.
-  const nudge = minGapKm + 0.012;
-  const targetKm = alertKm <= turnKm ? Math.max(0, turnKm - nudge) : turnKm + nudge;
-  const pt = pointAtRouteKm(routePoints, targetKm);
-  if (!pt) return alert;
-  return { ...alert, lat: pt.lat, lon: pt.lon };
-}
-
-/** Mantém alertas colados à polyline da rota. */
+/** Mantém alertas próximos da polyline da rota. */
 export function filterAlertsOnRoute(
   alerts: RoadAlert[],
   routePoints: Array<{ lat: number; lon: number }>,
@@ -101,6 +82,11 @@ export interface PickMapAlertsOptions {
   mapFocus?: { lat: number; lon: number } | null;
   visibleRadiusKm?: number;
   maxCount?: number;
+  /** Origem/destino para não empilhar ícones na prévia. */
+  routeEnds?: {
+    origin?: { lat: number; lon: number } | null;
+    destination?: { lat: number; lon: number } | null;
+  };
 }
 
 /** Alertas visíveis no mapa (navegação / prévia). */
@@ -113,7 +99,15 @@ export function pickAlertsForMap(
 ): RoadAlert[] {
   if (!alerts?.length || mode === 'idle') return [];
 
-  const { zoom = null, routeOverview = false, mapFocus = null, visibleRadiusKm = 18, maxCount = 180 } = opts;
+  const {
+    zoom = null,
+    routeOverview = false,
+    mapFocus = null,
+    visibleRadiusKm = 18,
+    maxCount = 180,
+    routeEnds,
+  } = opts;
+
   let pool = filterMapAlerts(alerts).filter(
     (a) => Number.isFinite(a.lat) && Number.isFinite(a.lon)
   );
@@ -125,18 +119,34 @@ export function pickAlertsForMap(
   }
   if (!pool.length) return [];
 
-  const dedupeGap = dedupeGapForZoom(zoom);
+  // Prévia: evita lombada/carro/bandeira um em cima do outro nas pontas.
+  if ((mode === 'preview' || routeOverview) && routeEnds) {
+    const tipGapKm = 0.09;
+    pool = pool.filter((a) => {
+      if (routeEnds.origin && haversineKm(a.lat, a.lon, routeEnds.origin.lat, routeEnds.origin.lon) < tipGapKm) {
+        return false;
+      }
+      if (
+        routeEnds.destination &&
+        haversineKm(a.lat, a.lon, routeEnds.destination.lat, routeEnds.destination.lon) < tipGapKm
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }
+
   const max =
     mode === 'preview' || routeOverview
-      ? Math.min(maxCount, 80)
-      : Math.min(maxCount, Math.max(maxAlertsForZoom(zoom), 18));
+      ? Math.min(maxCount, 100)
+      : Math.min(maxCount, Math.max(maxAlertsForZoom(zoom), 24));
 
   if (mode === 'preview' || routeOverview) {
-    return dedupeAlertsNearby(pool, dedupeGap).slice(0, max);
+    return dedupeAlertsNearby(pool, zoom).slice(0, max);
   }
 
   if (mode === 'navigate' && routePoints && routePoints.length >= 2) {
-    const userSnap = snapPointToRoute(userPosition, routePoints);
+    const userSnap = snapPointToRoute(userPosition, routePoints, true);
     const userKm = routeProgressKm(userSnap, routePoints);
     const focus = mapFocus ?? userSnap;
     const radiusKm = Math.min(Math.max(visibleRadiusKm, 2.5), 8);
@@ -144,7 +154,7 @@ export function pickAlertsForMap(
     pool = pool.filter((a) => {
       const distFocus = haversineKm(focus.lat, focus.lon, a.lat, a.lon);
       if (distFocus > radiusKm) return false;
-      const aKm = routeProgressKm(a, routePoints);
+      const aKm = alertRouteProgressKm(a, routePoints);
       return aKm >= userKm - 0.4 && aKm <= userKm + 12;
     });
   } else if (mapFocus) {
@@ -152,23 +162,33 @@ export function pickAlertsForMap(
     pool = pool.filter((a) => haversineKm(mapFocus.lat, mapFocus.lon, a.lat, a.lon) <= radiusKm);
   }
 
-  return dedupeAlertsNearby(pool, dedupeGap).slice(0, max);
+  return dedupeAlertsNearby(pool, zoom).slice(0, max);
+}
+
+/** Gap mínimo para dedupe — lombadas bem perto (18 m) ainda aparecem separadas. */
+export function dedupeGapForType(type: RoadAlert['type'], zoom: number | null): number {
+  if (type === 'lombada') {
+    if (zoom != null && zoom >= 16) return 0.012; // 12 m
+    return 0.018; // 18 m
+  }
+  if (type === 'radar') return 0.035;
+  if (zoom == null || !Number.isFinite(zoom)) return 0.04;
+  if (zoom >= 17) return 0.02;
+  if (zoom >= 15) return 0.035;
+  if (zoom >= 13) return 0.06;
+  return 0.1;
 }
 
 export function dedupeGapForZoom(zoom: number | null): number {
-  if (zoom == null || !Number.isFinite(zoom)) return 0.02;
-  if (zoom >= 17) return 0.012;
-  if (zoom >= 15) return 0.025;
-  if (zoom >= 13) return 0.05;
-  return 0.12;
+  return dedupeGapForType('perigo', zoom);
 }
 
 export function maxAlertsForZoom(zoom: number | null): number {
-  if (zoom == null || !Number.isFinite(zoom)) return 60;
-  if (zoom >= 17) return 90;
-  if (zoom >= 15) return 55;
-  if (zoom >= 13) return 30;
-  return 15;
+  if (zoom == null || !Number.isFinite(zoom)) return 80;
+  if (zoom >= 17) return 120;
+  if (zoom >= 15) return 80;
+  if (zoom >= 13) return 50;
+  return 28;
 }
 
 export function alertMarkerSizePx(zoom: number | null): number {
@@ -179,28 +199,12 @@ export function alertMarkerSizePx(zoom: number | null): number {
   return 20;
 }
 
-/** Ícones estilo Waze — HtmlMarker não herda CSS do app. */
-export function alertMarkerHtml(type: MapAlertType, zoom: number | null = null): string {
-  if (type === 'radar') return radarMarkerHtml(zoom);
-  if (type === 'lombada') return lombadaMarkerHtml(zoom);
-  if (type === 'perigo') return hazardMarkerHtml(zoom);
-  const meta = ALERT_TYPE_META[type];
-  const colors: Partial<Record<MapAlertType, string>> = {
-    policia: 'linear-gradient(180deg,#3b82f6,#1d4ed8)',
-    acidente: 'linear-gradient(180deg,#ef4444,#b91c1c)',
-    congestionamento: 'linear-gradient(180deg,#f59e0b,#d97706)',
-    obra: 'linear-gradient(180deg,#f97316,#c2410c)',
-    via_fechada: 'linear-gradient(180deg,#64748b,#334155)',
-    carro_parado: 'linear-gradient(180deg,#8b5cf6,#6d28d9)',
-    animal: 'linear-gradient(180deg,#84cc16,#4d7c0f)',
-    clima: 'linear-gradient(180deg,#38bdf8,#0284c7)',
-  };
-  return communityAlertMarkerHtml(
-    meta?.icon ?? '⚠️',
-    colors[type] ?? 'linear-gradient(180deg,#fb923c,#ea580c)',
-    zoom,
-    meta?.label ?? 'Alerta'
-  );
+export function visibleRadiusKmForZoom(zoom: number | null): number {
+  if (zoom == null || !Number.isFinite(zoom)) return 6;
+  if (zoom >= 16) return 3.5;
+  if (zoom >= 14) return 5;
+  if (zoom >= 12) return 8;
+  return 14;
 }
 
 export function alertTypeLabel(type: RoadAlert['type']): string {
@@ -211,19 +215,34 @@ export function alertTypeIcon(type: RoadAlert['type']): string {
   return metaIcon(type);
 }
 
-/** Evita pilha de ícones no mesmo trecho (OSM costuma repetir nós próximos). */
-export function dedupeAlertsNearby(alerts: RoadAlert[], minGapKm: number): RoadAlert[] {
+/**
+ * Remove só duplicatas OSM quase idênticas.
+ * Lombadas em sequência (2–4 a ~20–40 m) permanecem.
+ */
+export function dedupeAlertsNearby(
+  alerts: RoadAlert[],
+  zoom: number | null = null
+): RoadAlert[] {
   const kept: RoadAlert[] = [];
-  for (const alert of alerts) {
-    const tooClose = kept.some(
-      (k) =>
-        k.type === alert.type &&
-        haversineKm(k.lat, k.lon, alert.lat, alert.lon) < minGapKm
-    );
+  const sorted = [...alerts].sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  for (const alert of sorted) {
+    const gap = dedupeGapForType(alert.type, zoom);
+    const tooClose = kept.some((k) => {
+      if (k.type !== alert.type) return false;
+      if (k.id === alert.id) return true;
+      return haversineKm(k.lat, k.lon, alert.lat, alert.lon) < gap;
+    });
     if (!tooClose) kept.push(alert);
   }
   return kept;
 }
+
+export type NextAlertAhead = {
+  alert: RoadAlert;
+  distanceMeters: number;
+  /** Quantos do mesmo tipo em sequência (~120 m à frente do primeiro). */
+  count: number;
+};
 
 /** Próximo alerta à frente na rota (estilo faixa Waze). */
 export function findNextAlertAhead(
@@ -231,24 +250,39 @@ export function findNextAlertAhead(
   user: { lat: number; lon: number },
   routePoints?: Array<{ lat: number; lon: number }>,
   maxMeters = 500
-): { alert: RoadAlert; distanceMeters: number } | null {
+): NextAlertAhead | null {
   const pool = filterMapAlerts(alerts);
   if (!pool.length) return null;
 
   if (routePoints && routePoints.length >= 2) {
-    const userKm = routeProgressKm(user, routePoints);
+    const userKm = routeProgressKm(snapPointToRoute(user, routePoints, true), routePoints);
     let best: RoadAlert | null = null;
     let bestAhead = Infinity;
+    let bestKm = 0;
+
     for (const a of pool) {
-      const aKm = routeProgressKm(a, routePoints);
+      const aKm = alertRouteProgressKm(a, routePoints);
       const aheadKm = aKm - userKm;
-      if (aheadKm < 0.02 || aheadKm > maxMeters / 1000) continue;
+      if (aheadKm < 0.015 || aheadKm > maxMeters / 1000) continue;
       if (aheadKm < bestAhead) {
         bestAhead = aheadKm;
         best = a;
+        bestKm = aKm;
       }
     }
-    if (best) return { alert: best, distanceMeters: bestAhead * 1000 };
+    if (!best) return null;
+
+    const cluster = pool.filter((a) => {
+      if (a.type !== best!.type) return false;
+      const aKm = alertRouteProgressKm(a, routePoints);
+      return aKm >= bestKm - 0.01 && aKm <= bestKm + 0.14;
+    });
+
+    return {
+      alert: best,
+      distanceMeters: bestAhead * 1000,
+      count: Math.max(1, cluster.length),
+    };
   }
 
   let nearest: RoadAlert | null = null;
@@ -261,5 +295,28 @@ export function findNextAlertAhead(
       nearest = a;
     }
   }
-  return nearest ? { alert: nearest, distanceMeters: nearestM } : null;
+  return nearest ? { alert: nearest, distanceMeters: nearestM, count: 1 } : null;
+}
+
+export function alertMarkerHtml(type: RoadAlert['type'], zoom: number | null = null): string {
+  if (type === 'radar') return radarMarkerHtml(zoom);
+  if (type === 'lombada') return lombadaMarkerHtml(zoom);
+  if (type === 'perigo') return hazardMarkerHtml(zoom);
+  const meta = ALERT_TYPE_META[type as MapAlertType];
+  const colors: Partial<Record<MapAlertType, string>> = {
+    policia: 'linear-gradient(180deg,#3b82f6,#1d4ed8)',
+    acidente: 'linear-gradient(180deg,#ef4444,#b91c1c)',
+    congestionamento: 'linear-gradient(180deg,#f59e0b,#d97706)',
+    obra: 'linear-gradient(180deg,#f97316,#c2410c)',
+    via_fechada: 'linear-gradient(180deg,#64748b,#334155)',
+    carro_parado: 'linear-gradient(180deg,#8b5cf6,#6d28d9)',
+    animal: 'linear-gradient(180deg,#84cc16,#4d7c0f)',
+    clima: 'linear-gradient(180deg,#38bdf8,#0284c7)',
+  };
+  return communityAlertMarkerHtml(
+    meta?.icon ?? '⚠️',
+    colors[type as MapAlertType] ?? 'linear-gradient(180deg,#fb923c,#ea580c)',
+    zoom,
+    meta?.label ?? 'Alerta'
+  );
 }

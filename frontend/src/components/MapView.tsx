@@ -6,7 +6,6 @@ import type { DataSourceInstance, HtmlMarkerInstance, MapInstance, MapPosition }
 import {
   alertMarkerHtml,
   isMapAlertType,
-  offsetAlertFromManeuver,
   pickAlertsForMap,
 } from '../lib/roadAlerts';
 import { pickFuelPoisForMap } from '../lib/poisDirect';
@@ -732,9 +731,21 @@ export default function MapView({
   }, [fitRouteBounds]);
 
   const showPreviewRoute = useCallback(() => {
+    const pts = routePointsRef.current;
+    const shortRoute =
+      pts && pts.length >= 2
+        ? (() => {
+            let km = 0;
+            for (let i = 1; i < pts.length; i++) {
+              km += haversineKm(pts[i - 1].lat, pts[i - 1].lon, pts[i].lat, pts[i].lon);
+              if (km > 3) return false;
+            }
+            return true;
+          })()
+        : false;
     fitRouteBounds({
-      maxZoom: ZOOM_PREVIEW_MAX,
-      padding: { top: 72, bottom: 220, left: 32, right: 32 },
+      maxZoom: shortRoute ? 15 : ZOOM_PREVIEW_MAX,
+      padding: { top: 56, bottom: 280, left: 48, right: 48 },
     });
   }, [fitRouteBounds]);
 
@@ -1336,7 +1347,7 @@ export default function MapView({
     const atlas = atlasRef.current;
     if (!mapReadyRef.current || !map || !atlas) return;
 
-    if (mode !== 'navigate' && mode !== 'preview') {
+    if (mode !== 'navigate') {
       if (vehicleMarkerRef.current) {
         map.markers.remove(vehicleMarkerRef.current);
         vehicleMarkerRef.current = null;
@@ -1346,7 +1357,7 @@ export default function MapView({
 
     const snapToStart = Date.now() < navSnapToStartUntilRef.current;
     const focus =
-      routePoints && routePoints.length >= 2 && mode === 'navigate'
+      routePoints && routePoints.length >= 2
         ? resolveRouteFocus(userPosition, routePoints, routeOrigin, snapToStart)
         : userPosition;
     if (!isValidCoord(focus.lat, focus.lon)) return;
@@ -1589,14 +1600,17 @@ export default function MapView({
       mapFocus,
       visibleRadiusKm: visibleRadiusKmForZoom(zoom),
       maxCount: ALERTS_MAX_PREVIEW,
+      routeEnds: {
+        origin: routeOrigin ?? userPosition,
+        destination: destination ?? null,
+      },
     });
 
     const showDetailIcons = zoom == null || zoom >= 9;
     if (!showDetailIcons) return;
 
-    for (const raw of visible) {
-      if (!isMapAlertType(raw.type)) continue;
-      const alert = offsetAlertFromManeuver(raw, nextManeuver, routePoints);
+    for (const alert of visible) {
+      if (!isMapAlertType(alert.type)) continue;
 
       const marker = new atlas.HtmlMarker({
         position: [Number(alert.lon), Number(alert.lat)],
@@ -1618,7 +1632,10 @@ export default function MapView({
     followingGps,
     userPosition.lat,
     userPosition.lon,
-    nextManeuver,
+    routeOrigin?.lat,
+    routeOrigin?.lon,
+    destination?.lat,
+    destination?.lon,
   ]);
 
   useEffect(() => {

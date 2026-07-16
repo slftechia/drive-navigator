@@ -4,7 +4,7 @@ import {
   alertTypeSpeak,
   type RoadAlertType,
 } from './alertTypes';
-import { filterMapAlerts } from './roadAlerts';
+import { filterMapAlerts, alertRouteProgressKm } from './roadAlerts';
 import { getVoicePersona, pickSystemVoiceForPersona } from './voicePersonas';
 import { haversineKm, routeProgressKm } from '../utils/geo';
 
@@ -212,7 +212,7 @@ function isAlertAheadOnRoute(
   routePoints: Array<{ lat: number; lon: number }>
 ): boolean {
   const userKm = routeProgressKm({ lat, lon }, routePoints);
-  const alertKm = routeProgressKm(alert, routePoints);
+  const alertKm = alertRouteProgressKm(alert, routePoints);
   return alertKm >= userKm - 0.04 && alertKm <= userKm + 2.5;
 }
 
