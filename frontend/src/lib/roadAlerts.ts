@@ -1,5 +1,5 @@
 import type { RoadAlert } from '../api';
-import { distanceToRouteKm, haversineKm, routeProgressKm, snapPointToRoute } from '../utils/geo';
+import { distanceToRouteKm, haversineKm, pointAtRouteKm, routeProgressKm, snapPointToRoute } from '../utils/geo';
 import {
   ALL_ALERT_TYPES,
   ALERT_TYPE_META,
@@ -41,20 +41,48 @@ export function mergeRoadAlerts(
   return Array.from(map.values());
 }
 
-/** Cola alertas na polyline para ícones ficarem sobre a rota. */
+/** Cola alertas na polyline para ícones ficarem sobre a rota.
+ *  Perto da via (<50 m): mantém coords OSM (evita colar lombada na esquina/seta).
+ *  Mais longe: projeta na rota para não flutuar no quarteirão. */
 export function snapAlertsToRoute(
   alerts: RoadAlert[],
   routePoints: Array<{ lat: number; lon: number }>,
   maxDistKm = 0.35
 ): RoadAlert[] {
   if (routePoints.length < 2) return alerts;
+  const KEEP_OSM_KM = 0.05;
   const out: RoadAlert[] = [];
   for (const a of alerts) {
-    const snap = snapPointToRoute(a, routePoints);
+    const snap = snapPointToRoute(a, routePoints, true);
     if (snap.distanceKm > maxDistKm) continue;
-    out.push({ ...a, lat: snap.lat, lon: snap.lon });
+    if (snap.distanceKm <= KEEP_OSM_KM) {
+      out.push(a);
+    } else {
+      out.push({ ...a, lat: snap.lat, lon: snap.lon });
+    }
   }
   return out;
+}
+
+/** Afasta ícone de alerta se estiver em cima da seta de manobra. */
+export function offsetAlertFromManeuver(
+  alert: RoadAlert,
+  maneuver: { lat: number; lon: number } | null | undefined,
+  routePoints: Array<{ lat: number; lon: number }> | undefined,
+  minGapKm = 0.038
+): RoadAlert {
+  if (!maneuver || !routePoints || routePoints.length < 2) return alert;
+  const d = haversineKm(alert.lat, alert.lon, maneuver.lat, maneuver.lon);
+  if (d >= minGapKm) return alert;
+
+  const alertKm = routeProgressKm(alert, routePoints);
+  const turnKm = routeProgressKm(maneuver, routePoints);
+  // Empurra o alerta ao longo da rota, para o lado oposto à curva.
+  const nudge = minGapKm + 0.012;
+  const targetKm = alertKm <= turnKm ? Math.max(0, turnKm - nudge) : turnKm + nudge;
+  const pt = pointAtRouteKm(routePoints, targetKm);
+  if (!pt) return alert;
+  return { ...alert, lat: pt.lat, lon: pt.lon };
 }
 
 /** Mantém alertas colados à polyline da rota. */

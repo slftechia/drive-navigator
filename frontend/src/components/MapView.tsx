@@ -6,6 +6,7 @@ import type { DataSourceInstance, HtmlMarkerInstance, MapInstance, MapPosition }
 import {
   alertMarkerHtml,
   isMapAlertType,
+  offsetAlertFromManeuver,
   pickAlertsForMap,
 } from '../lib/roadAlerts';
 import { pickFuelPoisForMap } from '../lib/poisDirect';
@@ -1477,7 +1478,7 @@ export default function MapView({
       position: [Number(nextManeuver.lon), Number(nextManeuver.lat)],
       htmlContent: turnMapMarkerHtml(nextManeuver.instructionType, nextManeuver.message),
       anchor: 'center',
-      zIndex: 450,
+      zIndex: 520,
       pitchAlignment: 'map',
       rotationAlignment: 'map',
     });
@@ -1593,14 +1594,15 @@ export default function MapView({
     const showDetailIcons = zoom == null || zoom >= 9;
     if (!showDetailIcons) return;
 
-    for (const alert of visible) {
-      if (!isMapAlertType(alert.type)) continue;
+    for (const raw of visible) {
+      if (!isMapAlertType(raw.type)) continue;
+      const alert = offsetAlertFromManeuver(raw, nextManeuver, routePoints);
 
       const marker = new atlas.HtmlMarker({
         position: [Number(alert.lon), Number(alert.lat)],
         htmlContent: alertMarkerHtml(alert.type, zoom),
         anchor: 'center',
-        zIndex: 999,
+        zIndex: 480,
       });
       map.markers.add(marker);
       alertMarkersRef.current.push(marker);
@@ -1616,6 +1618,7 @@ export default function MapView({
     followingGps,
     userPosition.lat,
     userPosition.lon,
+    nextManeuver,
   ]);
 
   useEffect(() => {

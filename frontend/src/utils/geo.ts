@@ -203,6 +203,30 @@ export function polylineLengthKm(routePoints: Array<{ lat: number; lon: number }
   return km;
 }
 
+/** Ponto na polyline a `km` do início (ao longo da rota). */
+export function pointAtRouteKm(
+  routePoints: Array<{ lat: number; lon: number }>,
+  km: number
+): { lat: number; lon: number } | null {
+  if (routePoints.length < 2) return routePoints[0] ?? null;
+  const target = Math.max(0, km);
+  let walked = 0;
+  for (let i = 0; i < routePoints.length - 1; i++) {
+    const a = routePoints[i];
+    const b = routePoints[i + 1];
+    const seg = haversineKm(a.lat, a.lon, b.lat, b.lon);
+    if (walked + seg >= target || i === routePoints.length - 2) {
+      const t = seg > 1e-9 ? Math.min(1, Math.max(0, (target - walked) / seg)) : 0;
+      return {
+        lat: a.lat + (b.lat - a.lat) * t,
+        lon: a.lon + (b.lon - a.lon) * t,
+      };
+    }
+    walked += seg;
+  }
+  return routePoints[routePoints.length - 1];
+}
+
 /** Rumo de condução ao longo da rota (sempre sentido destino, evita mapa invertido). */
 export function routeHeadingAtPoint(
   point: { lat: number; lon: number },

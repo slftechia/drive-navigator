@@ -4,7 +4,7 @@ import App from './App';
 import './index.css';
 
 /** Muda a cada release — limpa cache do PWA instalado. */
-const BUILD_ID = '2026-07-16-place-share-safe-v1';
+const BUILD_ID = '2026-07-16-lombada-pos-v1';
 
 async function ensureFreshBuild() {
   try {
