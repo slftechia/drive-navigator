@@ -14,7 +14,7 @@ const BATCH_SIZE = 3;
 const MAX_SAMPLES = 80;
 const PARALLEL_BATCHES = 3;
 /** Lombadas OSM costumam ficar um pouco ao lado da polyline OSRM. */
-const SNAP_MAX_KM = 0.28;
+const SNAP_MAX_KM = 0.5;
 
 type OsmElement = {
   id: number;

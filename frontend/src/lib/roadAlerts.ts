@@ -82,6 +82,8 @@ export interface PickMapAlertsOptions {
   mapFocus?: { lat: number; lon: number } | null;
   visibleRadiusKm?: number;
   maxCount?: number;
+  /** Usuário pinçou/arrastou: mostrar alertas na área da câmera (não só à frente do GPS). */
+  exploring?: boolean;
   /** Origem/destino para não empilhar ícones na prévia. */
   routeEnds?: {
     origin?: { lat: number; lon: number } | null;
@@ -105,6 +107,7 @@ export function pickAlertsForMap(
     mapFocus = null,
     visibleRadiusKm = 18,
     maxCount = 180,
+    exploring = false,
     routeEnds,
   } = opts;
 
@@ -113,7 +116,8 @@ export function pickAlertsForMap(
   );
   if (!pool.length) return [];
 
-  const snapKm = routeOverview ? 0.3 : 0.28;
+  // Lombadas OSM costumam ficar um pouco ao lado da polyline — folga generosa.
+  const snapKm = routeOverview ? 0.45 : 0.5;
   if (routePoints && routePoints.length >= 2) {
     pool = snapAlertsToRoute(pool, routePoints, snapKm);
   }
@@ -139,26 +143,31 @@ export function pickAlertsForMap(
   const max =
     mode === 'preview' || routeOverview
       ? Math.min(maxCount, 100)
-      : Math.min(maxCount, Math.max(maxAlertsForZoom(zoom), 24));
+      : Math.min(maxCount, Math.max(maxAlertsForZoom(zoom), 40));
 
   if (mode === 'preview' || routeOverview) {
     return dedupeAlertsNearby(pool, zoom).slice(0, max);
   }
 
   if (mode === 'navigate' && routePoints && routePoints.length >= 2) {
-    const userSnap = snapPointToRoute(userPosition, routePoints, true);
-    const userKm = routeProgressKm(userSnap, routePoints);
-    const focus = mapFocus ?? userSnap;
-    const radiusKm = Math.min(Math.max(visibleRadiusKm, 2.5), 8);
+    const focus = mapFocus ?? userPosition;
+    const radiusKm = exploring
+      ? Math.min(Math.max(visibleRadiusKm, 5), 18)
+      : Math.min(Math.max(visibleRadiusKm, 3), 10);
 
-    pool = pool.filter((a) => {
-      const distFocus = haversineKm(focus.lat, focus.lon, a.lat, a.lon);
-      if (distFocus > radiusKm) return false;
-      const aKm = alertRouteProgressKm(a, routePoints);
-      return aKm >= userKm - 0.4 && aKm <= userKm + 12;
-    });
+    pool = pool.filter((a) => haversineKm(focus.lat, focus.lon, a.lat, a.lon) <= radiusKm);
+
+    // Em follow: prioriza à frente do carro. Ao pinçar: tudo o que estiver na área da câmera.
+    if (!exploring) {
+      const userSnap = snapPointToRoute(userPosition, routePoints, true);
+      const userKm = routeProgressKm(userSnap, routePoints);
+      pool = pool.filter((a) => {
+        const aKm = alertRouteProgressKm(a, routePoints);
+        return aKm >= userKm - 0.5 && aKm <= userKm + 15;
+      });
+    }
   } else if (mapFocus) {
-    const radiusKm = Math.min(visibleRadiusKm, routeOverview ? 40 : 10);
+    const radiusKm = Math.min(visibleRadiusKm, routeOverview ? 40 : 12);
     pool = pool.filter((a) => haversineKm(mapFocus.lat, mapFocus.lon, a.lat, a.lon) <= radiusKm);
   }
 
