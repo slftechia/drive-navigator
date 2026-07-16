@@ -1,5 +1,11 @@
 import type { RoadAlert } from '../api';
-import { distanceToRouteKm, haversineKm, routeProgressKm, snapPointToRoute } from '../utils/geo';
+import {
+  distanceToRouteKm,
+  haversineKm,
+  pointAtRouteKm,
+  routeProgressKm,
+  snapPointToRoute,
+} from '../utils/geo';
 import {
   ALL_ALERT_TYPES,
   ALERT_TYPE_META,
@@ -41,7 +47,7 @@ export function mergeRoadAlerts(
   return Array.from(map.values());
 }
 
-/** Progresso do alerta na rota (projeta só para cálculo; não muda o ícone no mapa). */
+/** Progresso do alerta na rota (projeta só para cálculo). */
 export function alertRouteProgressKm(
   alert: { lat: number; lon: number },
   routePoints: Array<{ lat: number; lon: number }>
@@ -51,8 +57,35 @@ export function alertRouteProgressKm(
 }
 
 /**
+ * Posição do ícone no mapa: sempre sobre a polyline (onde o motorista olha).
+ * Se cair em cima da manobra, empurra ~45 m depois da curva.
+ */
+export function alertMapPosition(
+  alert: { lat: number; lon: number },
+  routePoints: Array<{ lat: number; lon: number }>,
+  maneuver?: { lat: number; lon: number } | null
+): { lat: number; lon: number } {
+  if (routePoints.length < 2) return { lat: alert.lat, lon: alert.lon };
+
+  const snap = snapPointToRoute(alert, routePoints, true);
+  let km = routeProgressKm(snap, routePoints);
+
+  if (maneuver) {
+    const turnKm = routeProgressKm(
+      snapPointToRoute(maneuver, routePoints, true),
+      routePoints
+    );
+    if (Math.abs(km - turnKm) < 0.04) {
+      km = turnKm + 0.045;
+    }
+  }
+
+  return pointAtRouteKm(routePoints, km) ?? { lat: snap.lat, lon: snap.lon };
+}
+
+/**
  * Filtra alertas que estão perto da rota.
- * Mantém sempre as coordenadas OSM — nunca cola na esquina/seta de curva.
+ * Não altera coordenadas (a posição do ícone é alertMapPosition).
  */
 export function snapAlertsToRoute(
   alerts: RoadAlert[],
@@ -82,9 +115,7 @@ export interface PickMapAlertsOptions {
   mapFocus?: { lat: number; lon: number } | null;
   visibleRadiusKm?: number;
   maxCount?: number;
-  /** Usuário pinçou/arrastou: mostrar alertas na área da câmera (não só à frente do GPS). */
   exploring?: boolean;
-  /** Origem/destino para não empilhar ícones na prévia. */
   routeEnds?: {
     origin?: { lat: number; lon: number } | null;
     destination?: { lat: number; lon: number } | null;
@@ -116,14 +147,13 @@ export function pickAlertsForMap(
   );
   if (!pool.length) return [];
 
-  // Lombadas OSM costumam ficar um pouco ao lado da polyline — folga generosa.
-  const snapKm = routeOverview ? 0.45 : 0.5;
+  // Folga larga: a faixa “Lombada em Xm” usa progresso na rota; o ícone precisa do mesmo pool.
+  const snapKm = 1.0;
   if (routePoints && routePoints.length >= 2) {
     pool = snapAlertsToRoute(pool, routePoints, snapKm);
   }
   if (!pool.length) return [];
 
-  // Prévia: evita lombada/carro/bandeira um em cima do outro nas pontas.
   if ((mode === 'preview' || routeOverview) && routeEnds) {
     const tipGapKm = 0.09;
     pool = pool.filter((a) => {
@@ -143,7 +173,7 @@ export function pickAlertsForMap(
   const max =
     mode === 'preview' || routeOverview
       ? Math.min(maxCount, 100)
-      : Math.min(maxCount, Math.max(maxAlertsForZoom(zoom), 40));
+      : Math.min(maxCount, Math.max(maxAlertsForZoom(zoom), 60));
 
   if (mode === 'preview' || routeOverview) {
     return dedupeAlertsNearby(pool, zoom).slice(0, max);
@@ -151,24 +181,27 @@ export function pickAlertsForMap(
 
   if (mode === 'navigate' && routePoints && routePoints.length >= 2) {
     const focus = mapFocus ?? userPosition;
+    const userSnap = snapPointToRoute(userPosition, routePoints, true);
+    const userKm = routeProgressKm(userSnap, routePoints);
     const radiusKm = exploring
-      ? Math.min(Math.max(visibleRadiusKm, 5), 18)
-      : Math.min(Math.max(visibleRadiusKm, 3), 10);
+      ? Math.min(Math.max(visibleRadiusKm, 6), 20)
+      : Math.min(Math.max(visibleRadiusKm, 4), 12);
 
-    pool = pool.filter((a) => haversineKm(focus.lat, focus.lon, a.lat, a.lon) <= radiusKm);
-
-    // Em follow: prioriza à frente do carro. Ao pinçar: tudo o que estiver na área da câmera.
-    if (!exploring) {
-      const userSnap = snapPointToRoute(userPosition, routePoints, true);
-      const userKm = routeProgressKm(userSnap, routePoints);
-      pool = pool.filter((a) => {
-        const aKm = alertRouteProgressKm(a, routePoints);
-        return aKm >= userKm - 0.5 && aKm <= userKm + 15;
-      });
-    }
+    // Filtra pela posição NA ROTA (não pela coord OSM crua — ela pode estar fora da tela).
+    pool = pool.filter((a) => {
+      const onRoute = alertMapPosition(a, routePoints);
+      if (haversineKm(focus.lat, focus.lon, onRoute.lat, onRoute.lon) > radiusKm) return false;
+      if (exploring) return true;
+      const aKm = alertRouteProgressKm(a, routePoints);
+      return aKm >= userKm - 0.5 && aKm <= userKm + 15;
+    });
   } else if (mapFocus) {
     const radiusKm = Math.min(visibleRadiusKm, routeOverview ? 40 : 12);
-    pool = pool.filter((a) => haversineKm(mapFocus.lat, mapFocus.lon, a.lat, a.lon) <= radiusKm);
+    pool = pool.filter((a) => {
+      const onRoute =
+        routePoints && routePoints.length >= 2 ? alertMapPosition(a, routePoints) : a;
+      return haversineKm(mapFocus.lat, mapFocus.lon, onRoute.lat, onRoute.lon) <= radiusKm;
+    });
   }
 
   return dedupeAlertsNearby(pool, zoom).slice(0, max);
@@ -177,8 +210,8 @@ export function pickAlertsForMap(
 /** Gap mínimo para dedupe — lombadas bem perto (18 m) ainda aparecem separadas. */
 export function dedupeGapForType(type: RoadAlert['type'], zoom: number | null): number {
   if (type === 'lombada') {
-    if (zoom != null && zoom >= 16) return 0.012; // 12 m
-    return 0.018; // 18 m
+    if (zoom != null && zoom >= 16) return 0.012;
+    return 0.018;
   }
   if (type === 'radar') return 0.035;
   if (zoom == null || !Number.isFinite(zoom)) return 0.04;
@@ -209,11 +242,13 @@ export function alertMarkerSizePx(zoom: number | null): number {
 }
 
 export function visibleRadiusKmForZoom(zoom: number | null): number {
-  if (zoom == null || !Number.isFinite(zoom)) return 6;
-  if (zoom >= 16) return 3.5;
-  if (zoom >= 14) return 5;
-  if (zoom >= 12) return 8;
-  return 14;
+  if (zoom == null || !Number.isFinite(zoom)) return 8;
+  if (zoom >= 17) return 3.5;
+  if (zoom >= 16) return 5;
+  if (zoom >= 15) return 7;
+  if (zoom >= 14) return 9;
+  if (zoom >= 12) return 12;
+  return 16;
 }
 
 export function alertTypeLabel(type: RoadAlert['type']): string {
@@ -249,7 +284,6 @@ export function dedupeAlertsNearby(
 export type NextAlertAhead = {
   alert: RoadAlert;
   distanceMeters: number;
-  /** Quantos do mesmo tipo em sequência (~120 m à frente do primeiro). */
   count: number;
 };
 
@@ -270,7 +304,9 @@ export function findNextAlertAhead(
     let bestKm = 0;
 
     for (const a of pool) {
-      const aKm = alertRouteProgressKm(a, routePoints);
+      const snap = snapPointToRoute(a, routePoints, true);
+      if (snap.distanceKm > 1.0) continue;
+      const aKm = routeProgressKm(snap, routePoints);
       const aheadKm = aKm - userKm;
       if (aheadKm < 0.015 || aheadKm > maxMeters / 1000) continue;
       if (aheadKm < bestAhead) {
@@ -283,7 +319,9 @@ export function findNextAlertAhead(
 
     const cluster = pool.filter((a) => {
       if (a.type !== best!.type) return false;
-      const aKm = alertRouteProgressKm(a, routePoints);
+      const snap = snapPointToRoute(a, routePoints, true);
+      if (snap.distanceKm > 1.0) return false;
+      const aKm = routeProgressKm(snap, routePoints);
       return aKm >= bestKm - 0.01 && aKm <= bestKm + 0.14;
     });
 

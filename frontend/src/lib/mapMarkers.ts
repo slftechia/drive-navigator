@@ -23,12 +23,13 @@ export function radarMarkerHtml(zoom: number | null = null): string {
 
 export function lombadaMarkerHtml(zoom: number | null = null): string {
   const px = alertMarkerSizePx(zoom);
-  const icon = Math.round(px * 0.5);
-  return `<div style="width:${px}px;height:${px}px;background:linear-gradient(180deg,#fde047,#facc15);border:2.5px solid #1e293b;transform:rotate(45deg);box-shadow:0 2px 8px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;pointer-events:none" aria-label="Lombada">
-    <svg width="${icon}" height="${icon}" viewBox="0 0 24 24" style="transform:rotate(-45deg)" xmlns="http://www.w3.org/2000/svg">
-      <path d="M3 15 H21" stroke="#1e293b" stroke-width="2.5" stroke-linecap="round"/>
-      <path d="M6 15 L9 8 L12 15 L15 8 L18 15" fill="none" stroke="#1e293b" stroke-width="2" stroke-linejoin="round"/>
-      <path d="M5 17 H19" stroke="#1e293b" stroke-width="1.5" stroke-linecap="round"/>
+  const icon = Math.max(14, Math.round(px * 0.55));
+  // Losango via SVG (sem CSS rotate no wrapper — MapLibre corta overflow).
+  return `<div style="width:${px}px;height:${px}px;display:flex;align-items:center;justify-content:center;pointer-events:none;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.45))" aria-label="Lombada">
+    <svg width="${px}" height="${px}" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+      <rect x="6" y="6" width="28" height="28" rx="4" transform="rotate(45 20 20)" fill="#facc15" stroke="#1e293b" stroke-width="2.2"/>
+      <path d="M10 22 H30" stroke="#1e293b" stroke-width="2.2" stroke-linecap="round"/>
+      <path d="M13 22 L16 15 L20 22 L24 15 L27 22" fill="none" stroke="#1e293b" stroke-width="1.8" stroke-linejoin="round"/>
     </svg>
   </div>`;
 }

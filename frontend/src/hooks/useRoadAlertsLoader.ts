@@ -33,7 +33,7 @@ export function useRoadAlertsLoader({
     if (!incoming.length) return;
     const pts = routePointsRef.current;
     const snapped =
-      pts && pts.length >= 2 ? snapAlertsToRoute(incoming, pts, 0.5) : incoming;
+      pts && pts.length >= 2 ? snapAlertsToRoute(incoming, pts, 1.0) : incoming;
     if (!snapped.length) return;
     onAlertsRef.current((prev) => {
       if (!prev) return prev;

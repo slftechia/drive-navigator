@@ -5,6 +5,7 @@ import { mapStyleForTheme, routeColorsForTheme, type AppTheme } from '../lib/the
 import type { DataSourceInstance, HtmlMarkerInstance, MapInstance, MapPosition } from '../lib/atlasTypes';
 import {
   alertMarkerHtml,
+  alertMapPosition,
   isMapAlertType,
   pickAlertsForMap,
 } from '../lib/roadAlerts';
@@ -1615,11 +1616,17 @@ export default function MapView({
     for (const alert of visible) {
       if (!isMapAlertType(alert.type)) continue;
 
+      // Sempre sobre a rota (coords OSM cruas ficam fora da via / da tela).
+      const pos =
+        routePoints && routePoints.length >= 2
+          ? alertMapPosition(alert, routePoints, nextManeuver)
+          : { lat: alert.lat, lon: alert.lon };
+
       const marker = new atlas.HtmlMarker({
-        position: [Number(alert.lon), Number(alert.lat)],
+        position: [Number(pos.lon), Number(pos.lat)],
         htmlContent: alertMarkerHtml(alert.type, zoom),
         anchor: 'center',
-        zIndex: 480,
+        zIndex: 520,
         pitchAlignment: 'viewport',
       });
       map.markers.add(marker);
@@ -1640,6 +1647,7 @@ export default function MapView({
     routeOrigin?.lon,
     destination?.lat,
     destination?.lon,
+    nextManeuver,
   ]);
 
   useEffect(() => {
