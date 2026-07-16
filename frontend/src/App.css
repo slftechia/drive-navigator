@@ -179,40 +179,6 @@
   margin-top: 0.75rem;
 }
 
-.home-tools-row {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0.5rem;
-  margin-top: 0.7rem;
-}
-
-.home-tool-btn {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-  gap: 0.4rem;
-  padding: 0.72rem 0.4rem;
-  border-radius: 999px;
-  background: var(--surface);
-  border: 1px solid var(--surface2);
-  color: var(--text);
-  font-size: 0.8rem;
-  font-weight: 700;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
-}
-
-.home-tool-btn span {
-  font-size: 1rem;
-  line-height: 1;
-}
-
-.home-tool-btn-off {
-  opacity: 0.72;
-  border-color: color-mix(in srgb, var(--danger, #ef4444) 45%, var(--surface2));
-  color: var(--text-muted);
-}
-
 .home-quick-btn {
   display: flex;
   flex-direction: column;
@@ -952,6 +918,11 @@ html[data-theme='night'] .place-detail-btn-go {
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
+}
+
+/* Home: mesma coluna à direita, um pouco mais alta (sem banner de manobra). */
+.home-side-fabs {
+  top: calc(4.75rem + env(safe-area-inset-top, 0px));
 }
 
 .nav-side-fab {
