@@ -369,17 +369,43 @@ html[data-theme='night'] .place-detail-btn-go {
   padding-top: 0.55rem;
 }
 
+.home-recents-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
 .home-recents h3 {
   font-size: 0.78rem;
   font-weight: 700;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  margin-bottom: 0.35rem;
+  margin: 0;
+}
+
+.home-recents-clear {
+  border: none;
+  background: transparent;
+  color: var(--accent, #0ea5e9);
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.15rem 0;
+  cursor: pointer;
+}
+
+.home-recent-row-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
 }
 
 .home-recent-row {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
+  width: auto;
   display: flex;
   align-items: center;
   gap: 0.7rem;
@@ -389,6 +415,25 @@ html[data-theme='night'] .place-detail-btn-go {
   border-radius: 0;
   color: var(--text);
   text-align: left;
+}
+
+.home-recent-remove {
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.home-recent-remove:hover,
+.home-recent-remove:focus-visible {
+  background: var(--surface2);
+  color: var(--text);
 }
 
 .home-recent-icon {
@@ -573,6 +618,47 @@ html[data-theme='night'] .place-detail-btn-go {
   color: var(--accent);
   font-size: 0.8rem;
   padding: 0.25rem;
+}
+
+.search-recent-item {
+  display: flex !important;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0 !important;
+}
+
+.search-recent-pick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 0.5rem 0.85rem 1rem;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.search-recent-remove {
+  flex-shrink: 0;
+  width: 2.4rem;
+  height: 2.4rem;
+  margin-right: 0.45rem;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.search-recent-remove:hover,
+.search-recent-remove:focus-visible {
+  background: var(--surface2);
+  color: var(--text);
 }
 
 .search-group-label {

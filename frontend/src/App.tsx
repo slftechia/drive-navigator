@@ -51,7 +51,7 @@ import LegalDocSheet from './components/LegalDocSheet';
 import ReportSheet from './components/ReportSheet';
 import { useAutoTheme } from './hooks/useAutoTheme';
 import { useCurrentStreet } from './hooks/useCurrentStreet';
-import { loadRecentSearches, type RecentSearch } from './lib/searchHistory';
+import { loadRecentSearches, clearRecentSearches, removeRecentSearch, type RecentSearch } from './lib/searchHistory';
 import { openMusicApp } from './lib/musicApps';
 import {
   loadSavedPlaces,
@@ -932,32 +932,58 @@ export default function App() {
               </div>
               {homeRecents.length > 0 && (
                 <div className="home-recents">
-                  <h3>Recentes</h3>
-                  {homeRecents.map((r, i) => (
+                  <div className="home-recents-head">
+                    <h3>Recentes</h3>
                     <button
-                      key={`hr-${r.id}-${i}`}
                       type="button"
-                      className="home-recent-row"
+                      className="home-recents-clear"
                       onClick={() => {
-                        handleSearchPick({
-                          label: r.label,
-                          lat: r.lat,
-                          lon: r.lon,
-                          placeName: r.placeName,
-                          locationTag: r.locationTag || r.address,
-                          address: r.address,
-                          resultKind: r.resultKind,
-                          city: r.city,
-                          stateCode: r.stateCode,
-                        });
+                        if (!window.confirm('Apagar todo o histórico de recentes?')) return;
+                        clearRecentSearches();
+                        setHomeRecents([]);
                       }}
                     >
-                      <span className="home-recent-icon" aria-hidden>🕒</span>
-                      <span className="home-recent-text">
-                        <strong>{r.placeName || r.label}</strong>
-                        <em>{r.locationTag || r.address || r.city}</em>
-                      </span>
+                      Limpar tudo
                     </button>
+                  </div>
+                  {homeRecents.map((r, i) => (
+                    <div key={`hr-${r.id}-${i}`} className="home-recent-row-wrap">
+                      <button
+                        type="button"
+                        className="home-recent-row"
+                        onClick={() => {
+                          handleSearchPick({
+                            label: r.label,
+                            lat: r.lat,
+                            lon: r.lon,
+                            placeName: r.placeName,
+                            locationTag: r.locationTag || r.address,
+                            address: r.address,
+                            resultKind: r.resultKind,
+                            city: r.city,
+                            stateCode: r.stateCode,
+                          });
+                        }}
+                      >
+                        <span className="home-recent-icon" aria-hidden>🕒</span>
+                        <span className="home-recent-text">
+                          <strong>{r.placeName || r.label}</strong>
+                          <em>{r.locationTag || r.address || r.city}</em>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="home-recent-remove"
+                        aria-label={`Remover ${r.placeName || r.label} dos recentes`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeRecentSearch(r);
+                          setHomeRecents(loadRecentSearches().slice(0, 3));
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}

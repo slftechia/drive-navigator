@@ -5,6 +5,7 @@ import { brandTokens } from '../lib/photonSearch';
 import {
   clearRecentSearches,
   loadRecentSearches,
+  removeRecentSearch,
   saveRecentSearch,
   type RecentSearch,
 } from '../lib/searchHistory';
@@ -308,28 +309,44 @@ export default function SearchScreen({ userLat, userLon, originLabel, onBack, on
               type="button"
               className="search-section-clear"
               onClick={() => {
+                if (!window.confirm('Apagar todo o histórico de recentes?')) return;
                 clearRecentSearches();
                 setRecent([]);
               }}
             >
-              Limpar
+              Limpar tudo
             </button>
           </div>
           <ul className="search-results" role="listbox">
             {recent.map((s, i) => (
-              <li
-                key={`r-${s.id}-${i}`}
-                role="option"
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  select(s);
-                }}
-              >
-                <span className="search-result-pin">🕒</span>
-                <div className="search-result-text">
-                  <strong>{s.placeName || s.label}</strong>
-                  <span>{s.address || s.locationTag}</span>
-                </div>
+              <li key={`r-${s.id}-${i}`} className="search-recent-item" role="option">
+                <button
+                  type="button"
+                  className="search-recent-pick"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    select(s);
+                  }}
+                >
+                  <span className="search-result-pin">🕒</span>
+                  <div className="search-result-text">
+                    <strong>{s.placeName || s.label}</strong>
+                    <span>{s.address || s.locationTag}</span>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  className="search-recent-remove"
+                  aria-label={`Remover ${s.placeName || s.label} dos recentes`}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    removeRecentSearch(s);
+                    setRecent(loadRecentSearches());
+                  }}
+                >
+                  ×
+                </button>
               </li>
             ))}
           </ul>

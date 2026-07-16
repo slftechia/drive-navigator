@@ -31,6 +31,21 @@ export function saveRecentSearch(item: RecentSearch): void {
   }
 }
 
+export function removeRecentSearch(item: Pick<RecentSearch, 'lat' | 'lon' | 'placeName' | 'id'>): void {
+  try {
+    const next = loadRecentSearches().filter((r) => {
+      if (item.id && r.id && item.id === r.id) return false;
+      const sameCoords =
+        Math.abs(r.lat - item.lat) < 1e-4 && Math.abs(r.lon - item.lon) < 1e-4;
+      if (sameCoords && r.placeName === item.placeName) return false;
+      return true;
+    });
+    localStorage.setItem(KEY, JSON.stringify(next));
+  } catch {
+    /* ignore */
+  }
+}
+
 export function clearRecentSearches(): void {
   try {
     localStorage.removeItem(KEY);
