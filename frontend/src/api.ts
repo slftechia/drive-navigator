@@ -264,7 +264,7 @@ export async function fetchRoadAlerts(routePoints: RoutePoint[]): Promise<RoadAl
   const { fetchRoadAlertsDirect } = await import('./lib/roadAlertsDirect');
   const { snapAlertsToRoute } = await import('./lib/roadAlerts');
   const alerts = await fetchRoadAlertsDirect(routePoints);
-  return snapAlertsToRoute(alerts, routePoints, 1.0);
+  return snapAlertsToRoute(alerts, routePoints, 0.14);
 }
 
 export async function fetchRoadAlertsNear(lat: number, lon: number, radiusM = 3500): Promise<RoadAlert[]> {

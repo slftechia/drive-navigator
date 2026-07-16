@@ -1,5 +1,6 @@
 import type { RoadAlert } from '../api';
 import {
+  bearingDeg,
   distanceToRouteKm,
   haversineKm,
   pointAtRouteKm,
@@ -57,30 +58,116 @@ export function alertRouteProgressKm(
 }
 
 /**
- * Posição do ícone no mapa: sempre sobre a polyline (onde o motorista olha).
- * Se cair em cima da manobra, empurra ~45 m depois da curva.
+ * Posição do ícone no mapa: sobre a polyline.
+ * Evita esquina/seta de curva (OSM em via paralela costuma “grudar” no canto do L).
  */
 export function alertMapPosition(
   alert: { lat: number; lon: number },
   routePoints: Array<{ lat: number; lon: number }>,
   maneuver?: { lat: number; lon: number } | null
-): { lat: number; lon: number } {
+): { lat: number; lon: number } | null {
   if (routePoints.length < 2) return { lat: alert.lat, lon: alert.lon };
 
   const snap = snapPointToRoute(alert, routePoints, true);
+  // Longe da via = outro quarteirão; não desenhar (evita falso positivo na curva).
+  if (snap.distanceKm > 0.12) return null;
+
   let km = routeProgressKm(snap, routePoints);
+
+  // Empurra para fora de vértices de curva fechada.
+  km = slideOffSharpCorner(routePoints, km);
 
   if (maneuver) {
     const turnKm = routeProgressKm(
       snapPointToRoute(maneuver, routePoints, true),
       routePoints
     );
-    if (Math.abs(km - turnKm) < 0.04) {
-      km = turnKm + 0.045;
+    // Nunca em cima da seta: se estiver na zona da manobra, coloca ~70 m depois.
+    if (km >= turnKm - 0.055 && km <= turnKm + 0.04) {
+      km = turnKm + 0.07;
     }
   }
 
   return pointAtRouteKm(routePoints, km) ?? { lat: snap.lat, lon: snap.lon };
+}
+
+/** Se o km cai num canto (>50°), desliza 40 m ao longo da rota no sentido do destino. */
+function slideOffSharpCorner(
+  routePoints: Array<{ lat: number; lon: number }>,
+  km: number
+): number {
+  let walked = 0;
+  for (let i = 1; i < routePoints.length - 1; i++) {
+    const seg = haversineKm(
+      routePoints[i - 1].lat,
+      routePoints[i - 1].lon,
+      routePoints[i].lat,
+      routePoints[i].lon
+    );
+    const atVertex = walked + seg;
+    if (Math.abs(atVertex - km) < 0.035) {
+      const b1 = bearingDeg(
+        routePoints[i - 1].lat,
+        routePoints[i - 1].lon,
+        routePoints[i].lat,
+        routePoints[i].lon
+      );
+      const b2 = bearingDeg(
+        routePoints[i].lat,
+        routePoints[i].lon,
+        routePoints[i + 1].lat,
+        routePoints[i + 1].lon
+      );
+      let d = Math.abs(b2 - b1) % 360;
+      if (d > 180) d = 360 - d;
+      if (d >= 50) return atVertex + 0.04;
+    }
+    walked = atVertex;
+  }
+  return km;
+}
+
+/**
+ * Espaça ícones do mesmo tipo ao longo da rota (mín. 35 m) para não empilhar.
+ */
+export function layoutAlertMarkers(
+  alerts: RoadAlert[],
+  routePoints: Array<{ lat: number; lon: number }>,
+  maneuver?: { lat: number; lon: number } | null,
+  minGapKm = 0.035
+): Array<{ alert: RoadAlert; lat: number; lon: number }> {
+  if (!alerts.length) return [];
+  if (routePoints.length < 2) {
+    return alerts.map((a) => ({ alert: a, lat: a.lat, lon: a.lon }));
+  }
+
+  const placed: Array<{ alert: RoadAlert; lat: number; lon: number; km: number }> = [];
+
+  const sorted = [...alerts].sort(
+    (a, b) => alertRouteProgressKm(a, routePoints) - alertRouteProgressKm(b, routePoints)
+  );
+
+  for (const alert of sorted) {
+    let pos = alertMapPosition(alert, routePoints, maneuver);
+    if (!pos) continue;
+    let km = routeProgressKm(pos, routePoints);
+
+    // Empurra adiante se colidir com outro ícone já colocado.
+    for (let guard = 0; guard < 6; guard++) {
+      const clash = placed.some(
+        (p) => p.alert.type === alert.type && Math.abs(p.km - km) < minGapKm
+      );
+      if (!clash) break;
+      km += minGapKm;
+      const next = pointAtRouteKm(routePoints, km);
+      if (!next) break;
+      pos = next;
+    }
+
+    placed.push({ alert, lat: pos.lat, lon: pos.lon, km });
+  }
+
+  return placed.map(({ alert, lat, lon }) => ({ alert, lat, lon }));
 }
 
 /**
@@ -147,8 +234,8 @@ export function pickAlertsForMap(
   );
   if (!pool.length) return [];
 
-  // Folga larga: a faixa “Lombada em Xm” usa progresso na rota; o ícone precisa do mesmo pool.
-  const snapKm = 1.0;
+  // Só alertas realmente na via (antes 1 km puxava lombadas de rua paralela para a curva).
+  const snapKm = 0.14;
   if (routePoints && routePoints.length >= 2) {
     pool = snapAlertsToRoute(pool, routePoints, snapKm);
   }
@@ -305,7 +392,7 @@ export function findNextAlertAhead(
 
     for (const a of pool) {
       const snap = snapPointToRoute(a, routePoints, true);
-      if (snap.distanceKm > 1.0) continue;
+      if (snap.distanceKm > 0.14) continue;
       const aKm = routeProgressKm(snap, routePoints);
       const aheadKm = aKm - userKm;
       if (aheadKm < 0.015 || aheadKm > maxMeters / 1000) continue;
@@ -320,7 +407,7 @@ export function findNextAlertAhead(
     const cluster = pool.filter((a) => {
       if (a.type !== best!.type) return false;
       const snap = snapPointToRoute(a, routePoints, true);
-      if (snap.distanceKm > 1.0) return false;
+      if (snap.distanceKm > 0.14) return false;
       const aKm = routeProgressKm(snap, routePoints);
       return aKm >= bestKm - 0.01 && aKm <= bestKm + 0.14;
     });

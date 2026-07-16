@@ -5,8 +5,8 @@ import { mapStyleForTheme, routeColorsForTheme, type AppTheme } from '../lib/the
 import type { DataSourceInstance, HtmlMarkerInstance, MapInstance, MapPosition } from '../lib/atlasTypes';
 import {
   alertMarkerHtml,
-  alertMapPosition,
   isMapAlertType,
+  layoutAlertMarkers,
   pickAlertsForMap,
 } from '../lib/roadAlerts';
 import { pickFuelPoisForMap } from '../lib/poisDirect';
@@ -1613,20 +1613,16 @@ export default function MapView({
     const showDetailIcons = mode === 'navigate' || zoom == null || zoom >= 8;
     if (!showDetailIcons) return;
 
-    for (const alert of visible) {
+    const laidOut = layoutAlertMarkers(visible, routePoints ?? [], nextManeuver);
+
+    for (const { alert, lat, lon } of laidOut) {
       if (!isMapAlertType(alert.type)) continue;
 
-      // Sempre sobre a rota (coords OSM cruas ficam fora da via / da tela).
-      const pos =
-        routePoints && routePoints.length >= 2
-          ? alertMapPosition(alert, routePoints, nextManeuver)
-          : { lat: alert.lat, lon: alert.lon };
-
       const marker = new atlas.HtmlMarker({
-        position: [Number(pos.lon), Number(pos.lat)],
+        position: [Number(lon), Number(lat)],
         htmlContent: alertMarkerHtml(alert.type, zoom),
         anchor: 'center',
-        zIndex: 520,
+        zIndex: 480,
         pitchAlignment: 'viewport',
       });
       map.markers.add(marker);
